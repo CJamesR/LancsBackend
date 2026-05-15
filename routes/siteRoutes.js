@@ -1,0 +1,155 @@
+const express = require('express');
+const router = express.Router();
+const Site = require('../models/siteModel');
+const Device = require('../models/device');
+const ActivityLog = require('../models/activityLogModel'); // 🔥 TAMBAHAN
+const siteController = require('../controllers/siteController'); 
+const { protect, checkSiteRole } = require('../middleware/authMiddleware');
+
+const extractUserId = (req) => {
+    const raw = req.user?._id ?? req.user?.userId ?? req.user?.id;
+    if (!raw) throw new Error("User ID tidak ditemukan di token JWT.");
+    return raw.toString();
+};
+
+router.get('/', protect, siteController.getMySites);
+
+router.post('/', protect, async (req, res) => {
+    try {
+        const { name, location } = req.body;
+        const userId = extractUserId(req);
+
+        if (!name) return res.status(400).json({ success: false, message: "Nama Site wajib diisi!" });
+
+        const newSite = new Site({
+            name: name, location: location || "Lokasi tidak ditentukan",
+            ownerId: userId, admins: [], members: [], devices: []
+        });
+
+        await newSite.save();
+        res.status(201).json({ success: true, message: `Site '${name}' berhasil dibuat!`, data: newSite });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.get('/:siteId/members', protect, checkSiteRole(['owner', 'admin', 'member']), siteController.getSiteMembers);
+
+// Invite dengan RBAC ketat (Owner & Admin saja)
+router.post('/:siteId/invite', protect, siteController.inviteUser);
+
+// REMOVE DEVICE
+router.delete('/:siteId/devices/:deviceId', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
+    try {
+        const { siteId, deviceId } = req.params;
+        const retainData = req.query.retainData !== 'false';
+        const userId = extractUserId(req);
+
+        const site = await Site.findById(siteId);
+        
+        site.devices = site.devices.filter(id => id.toString() !== deviceId.toString());
+        site.admins.forEach(admin => { admin.allowedDevices = admin.allowedDevices.filter(id => id.toString() !== deviceId.toString()); });
+        await site.save();
+
+        const device = await Device.findOne({ serialID: deviceId });
+        let deviceName = deviceId;
+        if (device) {
+            deviceName = device.name || deviceId;
+            device.isClaimed = false; device.siteId = null; device.devicePassword = null;
+            await device.save();
+        }
+
+        // 🔥 CATAT AKTIVITAS
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: `Deleted node ${deviceName}`
+        });
+
+        let dataWiped = false;
+        if (!retainData) {
+            const mongoose = require('mongoose');
+            const collectionName = `sensor_${deviceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            const collections = await mongoose.connection.db.listCollections({ name: collectionName }).toArray();
+            if (collections.length > 0) { await mongoose.connection.db.dropCollection(collectionName); dataWiped = true; }
+        }
+
+        res.json({ success: true, message: `Alat ${deviceId} berhasil dicabut.`, dataWiped: dataWiped });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
+    }
+});
+
+// DELETE SITE
+router.delete('/:siteId', protect, checkSiteRole(['owner']), async (req, res) => {
+    try {
+        const { siteId } = req.params;
+        const retainData = req.query.retainData !== 'false';
+        const site = await Site.findById(siteId);
+
+        if (site.admins && site.admins.length > 0) {
+            return res.status(400).json({ success: false, code: "HAS_ADMINS", message: "Site masih memiliki Admin. Lepas Admin terlebih dahulu." });
+        }
+
+        if (site.devices && site.devices.length > 0) {
+            await Device.updateMany({ serialID: { $in: site.devices } }, { $set: { isClaimed: false, siteId: null, devicePassword: null } });
+        }
+
+        let wipedCollections = 0;
+        if (!retainData && site.devices && site.devices.length > 0) {
+            const mongoose = require('mongoose');
+            for (const deviceId of site.devices) {
+                const collectionName = `sensor_${deviceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                const collections = await mongoose.connection.db.listCollections({ name: collectionName }).toArray();
+                if (collections.length > 0) { await mongoose.connection.db.dropCollection(collectionName); wipedCollections++; }
+            }
+        }
+
+        await Site.findByIdAndDelete(siteId);
+        res.json({ success: true, message: `Site ${site.name} berhasil dihapus permanen.`, devicesFreed: site.devices.length, wipedCollections });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
+    }
+});
+
+// RENAME DEVICE (Fitur nomor 4 dari teman Anda)
+router.patch('/:siteId/devices/:deviceId/rename', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
+    try {
+        const { deviceId, siteId } = req.params;
+        const { newName } = req.body;
+        const userId = extractUserId(req);
+
+        const updatedDevice = await Device.findByIdAndUpdate(deviceId, { name: newName }, { new: true });
+
+        if (!updatedDevice) return res.status(404).json({ message: "Perangkat tidak ditemukan" });
+
+        // 🔥 CATAT AKTIVITAS
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: `Renamed device to ${newName}`
+        });
+
+        res.status(200).json({ message: "Nama perangkat berhasil diubah", data: updatedDevice });
+        if (global.io) { global.io.emit('device_renamed', { deviceId: updatedDevice._id, newName: updatedDevice.name }); }
+    } catch (error) {
+        res.status(500).json({ error: "Gagal mengubah nama perangkat" });
+    }
+});
+
+// 8. REMOVE MEMBER DARI SITE (Owner bisa hapus Admin/Member, Admin cuma bisa hapus Member)
+router.delete(
+    '/:siteId/members/:memberId',
+    protect,
+    checkSiteRole(['owner', 'admin']),
+    siteController.removeMember
+);
+
+// Hapus admin (owner saja)
+router.delete(
+    '/:siteId/admins/:adminId',
+    protect,
+    checkSiteRole(['owner']),
+    siteController.removeAdmin
+);
+module.exports = router;

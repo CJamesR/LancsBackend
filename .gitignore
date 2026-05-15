@@ -1,0 +1,17 @@
+# Folder dependencies yang ukurannya raksasa
+node_modules/
+
+# File rahasia (TIDAK BOLEH MASUK GIT!)
+.env
+config/serviceAccountKey.json
+serviceAccountKey.json
+
+# File log dan error bawaan sistem
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pm2/
+
+# File sistem operasi (opsional)
+.DS_Store
+Thumbs.db

@@ -1,0 +1,44 @@
+{
+  "name": "nodemongo",
+  "version": "1.0.0",
+  "description": "REST API untuk menerima data dari ESP8266 dan menyimpannya ke MongoDB Atlas",
+  "main": "server.js",
+  "scripts": {
+    "start": "nodemon server.js",
+    "testdb": "node run.js"
+  },
+  "keywords": [
+    "Node.js",
+    "MongoDB",
+    "ESP8266",
+    "IoT",
+    "API",
+    "MQTT"
+  ],
+  "author": "Calvin Riyono",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^8.3.1",
+    "firebase-admin": "^13.9.0",
+    "google-auth-library": "^10.6.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.19.2",
+    "morgan": "^1.10.1",
+    "mqtt": "^5.14.1",
+    "node-cache": "^5.1.2",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.7",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
