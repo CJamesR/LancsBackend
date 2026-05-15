@@ -6,6 +6,8 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const nodemailer = require('nodemailer');
 const dns = require('dns').promises;
 const bcrypt = require('bcryptjs');
+const {Resend} = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 // 🔥 TAMBAHAN IMPORT UNTUK FITUR KLAIM UNDANGAN SITE
 const PendingInvite = require('../models/pendingInviteModel');
@@ -69,7 +71,7 @@ exports.register = async (req, res) => {
       isActive: true,
       isVerified: false,
       verificationToken: verifyTokenHash,
-      verificationTokenExpires: Date.now() + 10 * 60 * 1000 // Token valid for 15 minutes 
+      verificationTokenExpires: Date.now() + 10 * 60 * 1000 // Token valid for 10 minutes 
     });
 
     console.log('✅ User created:', user.email);
@@ -102,28 +104,23 @@ exports.register = async (req, res) => {
     }
     // =====================================================================
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
     const domain = email.split('@')[1];
-    try{
+    try {
       const mxRecords = await dns.resolveMx(domain);
       if (!mxRecords || mxRecords.length === 0) {
+        await User.findByIdAndDelete(user._id); // Hapus user jika domain palsu
         return res.status(400).json({message: 'Email domain does not exist'});
       }
-    } catch (error){
+    } catch (error) {
+      await User.findByIdAndDelete(user._id); // Hapus user jika domain palsu
       return res.status(400).json({message: 'Email domain does not exist'});
     }
 
     const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify-email/${verifyToken}`;
 
-    const mailOptions = {
-      from: '"Lancs IoT" <noreply@lancsiot.com>',
+    // Eksekusi pengiriman email menggunakan Resend
+    const { data, error: resendError } = await resend.emails.send({
+      from: 'Lancs IoT <onboarding@resend.dev>', // Mode Sandbox Resend
       to: user.email,
       subject: 'Lancs IoT Account Verification',
       html: `
@@ -131,13 +128,26 @@ exports.register = async (req, res) => {
           <h2>Welcome, ${user.username}!</h2>
           <p>Click the button below to activate your account:</p>
           <a href="${verifyUrl}" style="background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block;">Verify Account</a>
-          <p style="margin-top: 20px; font-size: 12px; color: #888;">This link is valid for 24 hours.</p>
+          <p style="margin-top: 20px; font-size: 12px; color: #888;">This link is valid for 10 minutes.</p>
         </div>
       `
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-    console.log('📧 Verification email sent to:', user.email);
+    // Jika Resend gagal mengirim email
+    if (resendError) {
+      console.error('❌ Resend API Error (Register):', resendError);
+      
+      // Hapus user yang baru saja dibuat agar dia bisa mencoba daftar ulang nanti
+      await User.findByIdAndDelete(user._id);
+      
+      return res.status(500).json({ 
+        success: false,
+        message: 'Gagal mengirim email verifikasi. Registrasi dibatalkan.',
+        detail: resendError.message 
+      });
+    }
+
+    console.log('📧 Verification email sent via Resend to:', user.email);
     res.status(201).json({
       success: true,
       message: 'User has been created. Please check your email.'
@@ -475,27 +485,19 @@ exports.forgotPassword = async (req, res) => {
             return res.status(404).json({ message: 'Email is not registered in this Lancs IoT account.' });
         }
 
-        // Buat 6 digit OTP acak
+        // Buat token URL acak
         const resetToken = crypto.randomBytes(32).toString('hex');
         const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
         
         user.resetPasswordToken = resetTokenHash;
-        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // OTP valid selama 15 menit
+        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // valid selama 15 menit
         await user.save();
-
-        // 🔥 FIX PENTING: Inisialisasi Transporter di dalam fungsi ini
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            }
-        });
 
         const resetUrl = `https://lancs-iot.app/reset-password?token=${resetToken}&email=${user.email}`;
 
-        const mailOptions = {
-          from: '"Lancs IoT" <noreply@lancsiot.com>',
+        // Eksekusi pengiriman email reset password via Resend
+        const { data, error: resendError } = await resend.emails.send({
+          from: 'Lancs IoT <onboarding@resend.dev>',
           to: user.email,
           subject: 'Instruksi Reset Password - Lancs IoT',
           html: `
@@ -509,20 +511,30 @@ exports.forgotPassword = async (req, res) => {
                     <p>Jika Anda tidak merasa meminta reset password, abaikan email ini dan kata sandi Anda tidak akan berubah.</p>
                 </div>
             `
-        };
+        });
         
-        // Eksekusi pengiriman email
-        await transporter.sendMail(mailOptions);
+        // Jika Resend menolak pengiriman email
+        if (resendError) {
+            console.error("❌ Resend API Error (Forgot Password):", resendError);
+            
+            // Rollback database jika email gagal terkirim
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpires = undefined;
+            await user.save({ validateBeforeSave: false });
+            
+            return res.status(500).json({ success: false, message: "Gagal mengirim email reset password.", detail: resendError.message });
+        }
 
+        console.log("✅ Email terkirim via Resend. ID:", data?.id);
         res.status(200).json({ 
             success: true, 
             message: 'The reset password link has been sent to your email address. Please check your inbox.' 
         });
 
     } catch (error) {
-        console.error("Forgot Password Error:", error);
+        console.error("Forgot Password System Error:", error);
         
-        // Jika gagal kirim email, bersihkan kembali token di database
+        // Jika gagal karena error sistem, bersihkan kembali token di database
         if (req.body.email) {
             const user = await User.findOne({ email: req.body.email });
             if (user) {
