@@ -327,43 +327,34 @@ exports.removeMember = async (req, res) => {
         const removerId = extractUserId(req);
 
         const site = await Site.findById(siteId);
-        if (!site) return res.status(404).json({ success: false, message: "Site not found." });
+        if (!site) return res.status(404).json({ success: false, message: "Site tidak ditemukan." });
 
-        // Pastikan target bukan owner
-        if (site.ownerId.toString() === memberId.toString()) {
-            return res.status(400).json({ success: false, message: "Owner cannot be removed from the site." });
+        // Validasi Izin: Hanya Owner atau Admin yang boleh mengeluarkan Member
+        const isOwner = site.ownerId.toString() === removerId.toString();
+        const isAdmin = site.admins.some(a => a.userId.toString() === removerId.toString());
+
+        if (!isOwner && !isAdmin) {
+            return res.status(403).json({ success: false, message: "Akses ditolak. Anda bukan Owner/Admin." });
         }
 
-        // Pastikan target bukan admin — endpoint ini hanya untuk hapus member
-        const isTargetAdmin = site.admins.some(a => a.userId.toString() === memberId.toString());
-        if (isTargetAdmin) {
-            return res.status(403).json({
-                success: false,
-                message: "Use endpoint /admins/:adminId to remove Admin."
-            });
+        // Cari index member yang akan dihapus
+        const memberIndex = site.members.findIndex(m => m.userId.toString() === memberId.toString());
+        if (memberIndex === -1) {
+            return res.status(404).json({ success: false, message: "Member tidak ditemukan di Site ini." });
         }
 
-        const targetMemberIndex = (site.members || []).findIndex(
-            m => m.userId.toString() === memberId.toString()
-        );
-
-        if (targetMemberIndex === -1) {
-            return res.status(404).json({ success: false, message: "Member not found in this Site." });
-        }
-
-        site.members.splice(targetMemberIndex, 1);
+        // Eksekusi penghapusan
+        site.members.splice(memberIndex, 1);
         await site.save();
 
-        const targetUser = await User.findById(memberId).select('username');
-        const targetName = targetUser ? targetUser.username : "Unknown User";
-
+        // Log Aktivitas
         await ActivityLog.create({
             userId: removerId,
             siteId: siteId,
-            action: `Removed member ${targetName}`
+            action: `Removed member with ID ${memberId}`
         });
 
-        res.json({ success: true, message: `${targetName} successfully removed from the Site.` });
+        res.json({ success: true, message: "Member berhasil dikeluarkan." });
 
     } catch (error) {
         console.error("❌ Error Remove Member:", error);

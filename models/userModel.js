@@ -68,8 +68,8 @@ const userSchema = new mongoose.Schema({
     maxGateways: { type: Number, default: 10 },
     isActive: { type: Boolean, default: true }
   },
-  resetPasswordOtp: {type: String},
-  resetPasswordOtpExpires: {type: Date}
+  resetPasswordToken: {type: String, select: false},
+  resetPasswordExpires: { type: Date}
 }, {
   timestamps: true
 });

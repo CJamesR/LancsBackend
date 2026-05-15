@@ -47,11 +47,16 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
         let allowedGateways = [];
         const isOwner = site.ownerId._id.toString() === userId;
         const adminRecord = site.admins.find(v => v.userId.toString() === userId);
+        // Tambahan untuk mendeteksi member
+        const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
 
         if (isOwner) {
             allowedGateways = site.devices; 
         } else if (adminRecord) {
             allowedGateways = adminRecord.allowedDevices; 
+        } else if (memberRecord) {
+            // Member bisa melihat semua perangkat di dalam site
+            allowedGateways = site.devices; 
         } else {
             return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini' });
         }
@@ -92,7 +97,8 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
             success: true,
             siteName: site.name,
             ownerName: isOwner ? "Anda" : site.ownerId.username,
-            role: isOwner ? 'owner' : 'admin',
+            // Deteksi role apa yang sedang mengakses untuk dikirim ke frontend
+            role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
             data: devicesWithData
         });
 
@@ -124,12 +130,15 @@ router.get('/device/:deviceId/detail', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Site untuk alat ini tidak ditemukan.' });
         }
 
+        // Variabel Hak Akses
         const isOwner = site.ownerId.toString() === userId;
         const isAdminAllowed = site.admins.some(
             a => a.userId.toString() === userId && a.allowedDevices.includes(deviceId)
         );
+        // Tambahan untuk mengizinkan member melihat grafik
+        const isMember = site.members && site.members.some(m => m.userId.toString() === userId);
 
-        if (!isOwner && !isAdminAllowed) {
+        if (!isOwner && !isAdminAllowed && !isMember) {
             return res.status(403).json({ success: false, message: 'Akses ditolak ke data alat ini' });
         }
 
@@ -179,12 +188,7 @@ router.post('/sites/:siteId/invite', checkSiteRole(['owner', 'admin']), siteCont
 // DELETE /api/flutter/sites/:siteId/members/:memberId
 // =========================================================================
 // Hapus member (owner & admin bisa akses)
-router.delete(
-    '/sites/:siteId/members/:memberId',
-    protect,                              // ← fix: sebelumnya tidak ada
-    checkSiteRole(['owner', 'admin']),
-    siteController.removeMember
-);
+router.delete('/sites/:siteId/members/:memberId', protect, siteController.removeMember);
 
 // Hapus admin (owner saja)
 router.delete(
@@ -285,6 +289,7 @@ router.post('/invites/:inviteId/respond', async (req, res) => {
         const { inviteId } = req.params;
         const { action } = req.body;
         const userId = extractUserId(req);
+        console.log("Menerima request Invite Respond:", req.params.inviteId, req.body);
 
         if (!action || !['accept', 'decline'].includes(action)) {
             return res.status(400).json({ success: false, message: 'action harus "accept" atau "decline".' });

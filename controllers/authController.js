@@ -472,15 +472,15 @@ exports.forgotPassword = async (req, res) => {
         const user = await User.findOne({ email });
 
         if (!user) {
-            return res.status(404).json({ message: 'Email tidak terdaftar di sistem kami.' });
+            return res.status(404).json({ message: 'Email is not registered in this Lancs IoT account.' });
         }
 
         // Buat 6 digit OTP acak
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
         
-        // Simpan OTP dan set kedaluwarsa 10 menit dari sekarang
-        user.resetPasswordOtp = otp;
-        user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; 
+        user.resetPasswordToken = resetTokenHash;
+        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // OTP valid selama 15 menit
         await user.save();
 
         // 🔥 FIX PENTING: Inisialisasi Transporter di dalam fungsi ini
@@ -492,17 +492,21 @@ exports.forgotPassword = async (req, res) => {
             }
         });
 
+        const resetUrl = `https://lancs-iot.app/reset-password?token=${resetToken}&email=${user.email}`;
+
         const mailOptions = {
           from: '"Lancs IoT" <noreply@lancsiot.com>',
           to: user.email,
-          subject: 'OTP Reset Password - Lancs IoT',
+          subject: 'Instruksi Reset Password - Lancs IoT',
           html: `
-                <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
                     <h2>Reset Password Anda</h2>
                     <p>Seseorang telah meminta untuk mengatur ulang kata sandi akun Lancs IoT Anda.</p>
-                    <p>Berikut adalah kode OTP 6-digit Anda. Kode ini hanya berlaku selama <b>10 menit</b>:</p>
-                    <h1 style="background-color: #f4f4f4; padding: 10px; letter-spacing: 5px; color: #333;">${otp}</h1>
-                    <p>Jika Anda tidak merasa meminta reset password, abaikan email ini.</p>
+                    <p>Silakan klik tombol di bawah ini untuk mengatur ulang kata sandi Anda. Tautan ini hanya berlaku selama <b>15 menit</b>:</p>
+                    <a href="${resetUrl}" style="background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">Atur Ulang Kata Sandi</a>
+                    <p>Atau salin tautan ini ke browser Anda:</p>
+                    <p><a href="${resetUrl}">${resetUrl}</a></p>
+                    <p>Jika Anda tidak merasa meminta reset password, abaikan email ini dan kata sandi Anda tidak akan berubah.</p>
                 </div>
             `
         };
@@ -512,54 +516,71 @@ exports.forgotPassword = async (req, res) => {
 
         res.status(200).json({ 
             success: true, 
-            message: 'OTP has been sent to your email. OTP duration only 10 minutes.' 
+            message: 'The reset password link has been sent to your email address. Please check your inbox.' 
         });
 
     } catch (error) {
         console.error("Forgot Password Error:", error);
-        res.status(500).json({ error: error.message });
+        
+        // Jika gagal kirim email, bersihkan kembali token di database
+        if (req.body.email) {
+            const user = await User.findOne({ email: req.body.email });
+            if (user) {
+                user.resetPasswordToken = undefined;
+                user.resetPasswordExpires = undefined;
+                await user.save({ validateBeforeSave: false });
+            }
+        }
+        res.status(500).json({ success: false, message: "Terjadi kesalahan sistem saat mengirim email." });
     }
 };
 
-// @desc    Reset password
-// @route   POST /api/auth/reset-password
-// @access  Public
+// =========================================================================
+// RESET PASSWORD (URL Token Based)
+// =========================================================================
 exports.resetPassword = async (req, res) => {
     try {
-        const { email, otp, newPassword } = req.body;
+        // Menerima token mentah dan email dari URL, serta password baru dari form
+        const { email, token, newPassword } = req.body;
 
-        // Cari user berdasarkan email, pastikan OTP cocok, dan belum kedaluwarsa (> Date.now)
+        if (!token || !newPassword || !email) {
+            return res.status(400).json({ success: false, message: 'Data tidak lengkap.' });
+        }
+
+        // 1. Lakukan hash pada token mentah yang diterima dari user
+        const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+        // 2. Cari user berdasarkan email dan hash token, pastikan belum kedaluwarsa
+        // Tambahkan .select('+resetPasswordToken') karena tadi kita set select: false di model
         const user = await User.findOne({
-            email: email,
-            resetPasswordOtp: otp,
+            email: email.toLowerCase(),
+            resetPasswordToken: resetTokenHash,
             resetPasswordExpires: { $gt: Date.now() }
-        });
+        }).select('+resetPasswordToken');
 
         if (!user) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Wrong OTP or Expired!'
+                message: 'Tautan reset password tidak valid atau sudah kedaluwarsa.'
             });
         }
 
-        // Hash password baru sebelum disimpan
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-        // Update password dan bersihkan memori OTP
-        user.password = hashedPassword;
-        user.resetPasswordOtp = undefined;
+        // 3. Update password (pre-save hook di userModel akan otomatis melakukan hashing pada password baru)
+        user.password = newPassword;
+        
+        // 4. Bersihkan token dari database karena sudah selesai digunakan
+        user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
         await user.save();
 
         res.status(200).json({ 
             success: true, 
-            message: 'Password has been reset successfully!' 
+            message: 'Password berhasil diubah. Silakan login menggunakan password baru.' 
         });
 
     } catch (error) {
         console.error("Password reset error:", error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
