@@ -11,9 +11,9 @@ function getWIBTime() {
 }
 
 // ESP8266: Add sensor data via HTTP POST (API Key)
+// ESP8266: Add sensor data via HTTP POST (API Key)
 exports.addSensorData = async (req, res) => {
   try {
-    // ✅ PERUBAHAN 1: Tambahkan DeviceTime ke dalam tangkapan req.body
     let { ServerID, Suhu, Kelembapan, Checksum, RealID, DeviceTime } = req.body;
 
     console.log('📥 ESP8266 Data received:', { ServerID, Suhu, Kelembapan, DeviceTime });
@@ -39,13 +39,11 @@ exports.addSensorData = async (req, res) => {
     // Get sensor model
     const SensorModel = getSensorModel(ServerID);
 
-    // ✅ PERUBAHAN 2: Logika penentuan waktu (Alat vs Server)
     const serverTime = getWIBTime();
     let recordTime = serverTime; // Default pakai waktu server
 
     if (DeviceTime) {
       const parsedTime = new Date(DeviceTime);
-      // Pastikan format waktunya valid (bukan "Invalid Date")
       if (!isNaN(parsedTime.getTime())) {
         recordTime = parsedTime;
       } else {
@@ -57,12 +55,11 @@ exports.addSensorData = async (req, res) => {
       ServerID,
       Suhu,
       Kelembapan,
-      Waktu: recordTime, // ✅ PERUBAHAN 3: Gunakan waktu yang sudah difilter
+      Waktu: recordTime, 
       source: 'http',
-      RealID: RealID || "-" // atau 'mqtt' jika dari MQTT
+      RealID: RealID || "-" 
     };
 
-    // Add checksum if provided
     if (Checksum) {
       sensorData.Checksum = Checksum;
     }
@@ -74,47 +71,51 @@ exports.addSensorData = async (req, res) => {
 
     const device = await Device.findOne({ serialID: ServerID });
 
-    if (device && device.siteId) {
-      // Biarkan lastActive menggunakan waktu server (kapan server menerima ping)
+    if (device) {
+      // 1. UPDATE STATUS (BERLAKU UNTUK SEMUA ALAT: Diklaim maupun Belum)
       device.lastActive = new Date();
       device.isOnline = true;
       await device.save();
 
-      let alertType = null;
-      let title = '';
-      let message = '';
+      // 2. LOGIKA ALARM/NOTIFIKASI (Hanya jika alat sudah dimasukkan ke Site)
+      if (device.siteId) {
+        let alertType = null;
+        let title = '';
+        let message = '';
 
-      const maxT = device.maxTemp || 35;
-      const minT = device.minTemp || 15;
+        const maxT = device.maxTemp || 35;
+        const minT = device.minTemp || 15;
 
-      if (Suhu > maxT) {
-        alertType = 'ALERT_HIGH_TEMP';
-        title = 'Peringatan: Suhu Tinggi';
-        message = `Suhu ${Suhu}°C melebihi batas maksimum ${maxT}°C.`;
-      } else if (Suhu < minT) {
-        alertType = 'ALERT_LOW_TEMP';
-        title = 'Peringatan: Suhu Rendah';
-        message = `Suhu ${Suhu}°C di bawah batas minimum ${minT}°C.`;
-      }
-      if (alertType) {
-        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-        const recentSpamCheck = await Notification.findOne({
-          deviceId: ServerID,
-          type: alertType,
-          createdAt: { $gte: fifteenMinutesAgo }
-        });
-        if (!recentSpamCheck) {
-          await Notification.create({
-            siteId: device.siteId,
+        if (Suhu > maxT) {
+          alertType = 'ALERT_HIGH_TEMP';
+          title = 'Peringatan: Suhu Tinggi';
+          message = `Suhu ${Suhu}°C melebihi batas maksimum ${maxT}°C.`;
+        } else if (Suhu < minT) {
+          alertType = 'ALERT_LOW_TEMP';
+          title = 'Peringatan: Suhu Rendah';
+          message = `Suhu ${Suhu}°C di bawah batas minimum ${minT}°C.`;
+        }
+        if (alertType) {
+          const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+          const recentSpamCheck = await Notification.findOne({
             deviceId: ServerID,
             type: alertType,
-            title: title,
-            message: message
+            createdAt: { $gte: fifteenMinutesAgo }
           });
-          console.log(`⚠️ ALARM MQTT TERPICU: ${title} pada ${device.name}`);
+          if (!recentSpamCheck) {
+            await Notification.create({
+              siteId: device.siteId,
+              deviceId: ServerID,
+              type: alertType,
+              title: title,
+              message: message
+            });
+            console.log(`⚠️ ALARM HTTP TERPICU: ${title} pada ${device.name || ServerID}`);
+          }
         }
       }
     }
+
     // Publish to MQTT if needed (for real-time updates)
     if (global.mqttHandler && global.mqttHandler.connected) {
       const mqtt = require('../mqtt/mqttHandler');
@@ -124,21 +125,12 @@ exports.addSensorData = async (req, res) => {
       });
     }
 
-    // if (global.io) {
-    //   global.io.to(ServerID).emit('live_data_update', {
-    //     temperature: Suhu,
-    //     humidity: Kelembapan,
-    //     timestamp: recordTime // ✅ Menggunakan waktu alat jika di-uncomment nanti
-    //   });
-    //   console.log(`📡 Emitted live_data_update to room ${ServerID}`);
-    // }
-
     res.status(201).json({
       success: true,
       message: `Data berhasil disimpan ke sensor_${ServerID}`,
       data: {
         ...saved._doc,
-        Waktu: recordTime.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }) // ✅ Gunakan recordTime
+        Waktu: recordTime.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }) 
       }
     });
 

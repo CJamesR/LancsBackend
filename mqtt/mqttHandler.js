@@ -133,46 +133,55 @@ class MQTTHandler {
       console.log(`✅ Sukses tersimpan ke collection: sensor_${ServerID} | Suhu: ${Suhu}, Hum: ${Kelembapan}`);
 
       const device = await Device.findOne({ serialID: ServerID });
-      if (device && device.siteId) {
+      
+      if (device) {
+        // 1. UPDATE STATUS (BERLAKU UNTUK SEMUA ALAT)
         device.lastActive = new Date();
         device.isOnline = true;
         await device.save();
 
-        let alertType = null;
-        let title = '';
-        let message = '';
+        // 2. LOGIKA ALARM/NOTIFIKASI (Hanya jika alat sudah dimasukkan ke Site)
+        if (device.siteId) {
+          let alertType = null;
+          let title = '';
+          let message = '';
 
-        const maxT = device.maxTemp || 35;
-        const minT = device.minTemp || 15;
-        if (Suhu > maxT) {
-          alertType = 'ALERT_HIGH_TEMP';
-          title = 'Peringatan: Suhu Terlalu Tinggi!';
-          message = `Suhu mencapai ${Suhu}°C, melebihi batas maksimum ${maxT}°C.`;
-      } else if (Suhu < minT) {
-          alertType = 'ALERT_LOW_TEMP';
-          title = 'Peringatan: Suhu Terlalu Rendah!';
-          message = `Suhu mencapai ${Suhu}°C, di bawah batas minimum ${minT}°C.`;
-      }
+          const maxT = device.maxTemp || 35;
+          const minT = device.minTemp || 15;
 
-      if (alertType) {
-        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-        const recentAlert = await Notification.findOne({
-          deviceId: ServerID,
-          type: alertType,
-          createdAt: { $gte: fifteenMinutesAgo }
-        });
-        if (!recentAlert) {
-          await Notification.create({
-            siteId: device.siteId,
-            deviceId: ServerID,
-            type: alertType,
-            title: title,
-            message: message
-          });
-          console.log(`⚠️ ALARM MQTT TERPICU: ${title} pada ${device.name}`);
+          if (Suhu > maxT) {
+              alertType = 'ALERT_HIGH_TEMP';
+              title = 'Peringatan: Suhu Tinggi';
+              message = `Suhu ${Suhu}°C melebihi batas maksimum ${maxT}°C.`;
+          } else if (Suhu < minT) {
+              alertType = 'ALERT_LOW_TEMP';
+              title = 'Peringatan: Suhu Rendah';
+              message = `Suhu ${Suhu}°C di bawah batas minimum ${minT}°C.`;
+          }
+
+          if (alertType) {
+              const Notification = require('../models/notificationModel');
+              const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+              
+              const recentSpamCheck = await Notification.findOne({
+                  deviceId: ServerID,
+                  type: alertType,
+                  createdAt: { $gte: fifteenMinutesAgo }
+              });
+
+              if (!recentSpamCheck) {
+                  await Notification.create({
+                      siteId: device.siteId,
+                      deviceId: ServerID,
+                      type: alertType,
+                      title: title,
+                      message: message
+                  });
+                  console.log(`⚠️ ALARM MQTT TERPICU: ${title} pada ${device.name || ServerID}`);
+              }
+          }
         }
       }
-    }
 
       // Kirim balasan ke ESP8266
       this.publish(`LancsSK/ack/${ServerID}`, JSON.stringify({

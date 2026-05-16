@@ -10,13 +10,21 @@ const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 // =========================================================================
 router.get('/sim/available', protect, async (req, res) => {
     try {
-        const availableDevices = await Device.find({ isClaimed: false }).select('serialID name');
+        const availableDevices = await Device.find({ isClaimed: false, isOnline: true }).select('serialID name');
 
         const dataFrontend = availableDevices.map(device => ({
             _id: device._id,
             serialID: device.serialID,
-            name: (device.name && device.name.trim() !== "") ? device.name : device.serialID
+            name: device.serialID
         }));
+
+        if (dataFrontend.length === 0){
+            return res.json({
+                success: true,
+                message: 'No Device is currently active and available for claiming.',
+                data: []
+            })
+        }
         
         res.json({
             success: true,
