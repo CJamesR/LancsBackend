@@ -13,6 +13,9 @@ router.get('/verify-email/:token', authController.verifyEmail);
 router.post('/logout', protect, authController.logout);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
+router.get('/verify-reset/:token', authController.verifyResetToken);
+
+// Protected routes
 router.post('/profile', protect, authController.getProfile);
 router.post('/profile/update', protect, authController.updateProfile);
 router.put('/change-password', protect, authController.changePassword);

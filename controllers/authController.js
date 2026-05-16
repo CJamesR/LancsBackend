@@ -6,8 +6,6 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const nodemailer = require('nodemailer');
 const dns = require('dns').promises;
 const bcrypt = require('bcryptjs');
-const {Resend} = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 // 🔥 TAMBAHAN IMPORT UNTUK FITUR KLAIM UNDANGAN SITE
 const PendingInvite = require('../models/pendingInviteModel');
@@ -27,6 +25,17 @@ const generateToken = (userId, role) => {
     { expiresIn: '7d' }
   );
 };
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: false,
+  auth:{
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+});
+
 
 exports.register = async (req, res) => {
   try {
@@ -71,7 +80,7 @@ exports.register = async (req, res) => {
       isActive: true,
       isVerified: false,
       verificationToken: verifyTokenHash,
-      verificationTokenExpires: Date.now() + 10 * 60 * 1000 // Token valid for 10 minutes 
+      verificationTokenExpires: Date.now() + 10 * 60 * 1000 // Token valid for 15 minutes 
     });
 
     console.log('✅ User created:', user.email);
@@ -105,22 +114,21 @@ exports.register = async (req, res) => {
     // =====================================================================
 
     const domain = email.split('@')[1];
-    try {
+    try{
       const mxRecords = await dns.resolveMx(domain);
       if (!mxRecords || mxRecords.length === 0) {
-        await User.findByIdAndDelete(user._id); // Hapus user jika domain palsu
+        await User.findByIdAndDelete(user._id);
         return res.status(400).json({message: 'Email domain does not exist'});
       }
-    } catch (error) {
-      await User.findByIdAndDelete(user._id); // Hapus user jika domain palsu
+    } catch (error){
+      await User.findByIdAndDelete(user._id);
       return res.status(400).json({message: 'Email domain does not exist'});
     }
 
     const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify-email/${verifyToken}`;
 
-    // Eksekusi pengiriman email menggunakan Resend
-    const { data, error: resendError } = await resend.emails.send({
-      from: 'Lancs IoT <onboarding@resend.dev>', // Mode Sandbox Resend
+    const mailOptions = {
+      from: '"Lancs IoT" <calvinriyono@gmail.com>',
       to: user.email,
       subject: 'Lancs IoT Account Verification',
       html: `
@@ -128,53 +136,41 @@ exports.register = async (req, res) => {
           <h2>Welcome, ${user.username}!</h2>
           <p>Click the button below to activate your account:</p>
           <a href="${verifyUrl}" style="background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block;">Verify Account</a>
-          <p style="margin-top: 20px; font-size: 12px; color: #888;">This link is valid for 10 minutes.</p>
+          <p style="margin-top: 20px; font-size: 12px; color: #888;">This link is valid for 24 hours.</p>
         </div>
       `
-    });
+    };
 
-    // Jika Resend gagal mengirim email
-    if (resendError) {
-      console.error('❌ Resend API Error (Register):', resendError);
-      
-      // Hapus user yang baru saja dibuat agar dia bisa mencoba daftar ulang nanti
-      await User.findByIdAndDelete(user._id);
-      
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log('📧 Verification email sent via Brevo to:', user.email);
+      res.status(201).json({
+        success: true,
+        message: 'User has been created. Please check your email.'
+      });
+    } catch (emailError) {
+      console.error('❌ Gagal kirim email Brevo:', emailError);
+      await User.findByIdAndDelete(user._id); // Hapus user jika email gagal terkirim
       return res.status(500).json({ 
         success: false,
-        message: 'Gagal mengirim email verifikasi. Registrasi dibatalkan.',
-        detail: resendError.message 
+        message: 'Failed to send verification email. Registration cancelled.' 
       });
     }
-
-    console.log('📧 Verification email sent via Resend to:', user.email);
-    res.status(201).json({
-      success: true,
-      message: 'User has been created. Please check your email.'
-    });
 
   } catch (error) {
     console.error('🔥 REGISTER Error:', error);
 
-    // Handle duplicate key error
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
-      return res.status(400).json({
-        message: `${field} is already in use`
-      });
+      return res.status(400).json({ message: `${field} is already in use` });
     }
 
-    // Handle validation error
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(e => e.message);
-      return res.status(400).json({
-        message: messages[0] || 'Validation Failed'
-      });
+      return res.status(400).json({ message: messages[0] || 'Validation Failed' });
     }
 
-    res.status(500).json({
-      message: 'Registration Error'
-    });
+    res.status(500).json({ message: 'Registration Error' });
   }
 };
 
@@ -183,10 +179,8 @@ exports.register = async (req, res) => {
 // @access  Public
 exports.login = async (req, res) => {
   let user;
-
   try {
     console.log('🔐 LOGIN Request:', req.body);
-
     const { identifier, password } = req.body;
 
     // Validasi input
@@ -234,9 +228,8 @@ exports.login = async (req, res) => {
         message: 'Email has not been verified. Please check your email for verification.'
       });
     }
-    // Generate token
+
     const token = generateToken(user._id, user.role);
-    // PERBAIKAN: Handle username yang mungkin undefined/null
     const username = user.username || user.email.split('@')[0] || 'User';
 
     // Format response untuk Flutter
@@ -293,40 +286,32 @@ exports.login = async (req, res) => {
 exports.refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-
-    if (!refreshToken) {
+    if (!refreshToken) 
       return res.status(400).json({
         message: 'Refresh token is required'
       });
-    }
-
+    
     // Find user by refresh token
     const user = await User.findOne({ refreshToken });
-    if (!user) {
+    if (!user) 
       return res.status(401).json({
         message: 'Refresh token is not valid'
       });
-    }
 
     // Check if user is active
-    if (!user.isActive) {
+    if (!user.isActive)
       return res.status(401).json({
         message: 'Account is not active'
       });
-    }
-
+    
     // Generate new token
     const newToken = generateToken(user._id, user.role);
-
-    res.json({
-      token: newToken
-    });
+    res.json({token: newToken});
 
   } catch (error) {
     console.error('🔥 REFRESH TOKEN Error:', error);
     res.status(500).json({
-      message: 'Error refreshing token'
-    });
+      message: 'Error refreshing token'});
   }
 };
 
@@ -485,65 +470,48 @@ exports.forgotPassword = async (req, res) => {
             return res.status(404).json({ message: 'Email is not registered in this Lancs IoT account.' });
         }
 
-        // Buat token URL acak
         const resetToken = crypto.randomBytes(32).toString('hex');
         const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
         
         user.resetPasswordToken = resetTokenHash;
-        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // valid selama 15 menit
+        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // Valid 15 menit
         await user.save();
 
-        const resetUrl = `https://lancs-iot.app/reset-password?token=${resetToken}&email=${user.email}`;
+        // Menggunakan format dinamis req.protocol dan req.get('host') persis seperti register
+        const resetUrl = `lancsapp://reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
 
-        // Eksekusi pengiriman email reset password via Resend
-        const { data, error: resendError } = await resend.emails.send({
-          from: 'Lancs IoT <onboarding@resend.dev>',
+        const mailOptions = {
+          from: '"Lancs IoT Security" <calvinriyono@gmail.com>',
           to: user.email,
           subject: 'Instruksi Reset Password - Lancs IoT',
           html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2>Reset Password Anda</h2>
+                <div style="font-family: sans-serif; text-align: center; border: 1px solid #eee; padding: 20px;">
+                    <h2 style="color: #2196F3;">Reset Password Anda</h2>
                     <p>Seseorang telah meminta untuk mengatur ulang kata sandi akun Lancs IoT Anda.</p>
-                    <p>Silakan klik tombol di bawah ini untuk mengatur ulang kata sandi Anda. Tautan ini hanya berlaku selama <b>15 menit</b>:</p>
-                    <a href="${resetUrl}" style="background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">Atur Ulang Kata Sandi</a>
-                    <p>Atau salin tautan ini ke browser Anda:</p>
-                    <p><a href="${resetUrl}">${resetUrl}</a></p>
-                    <p>Jika Anda tidak merasa meminta reset password, abaikan email ini dan kata sandi Anda tidak akan berubah.</p>
+                    <p>Silakan klik tombol di bawah ini untuk memverifikasi permintaan reset password Anda:</p>
+                    <a href="${resetUrl}" style="background-color: #2196F3; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; font-weight: bold;">Verifikasi Reset Password</a>
+                    <p style="font-size: 12px; color: #888;">Tautan ini berlaku selama 15 menit.</p>
                 </div>
             `
-        });
+        };
         
-        // Jika Resend menolak pengiriman email
-        if (resendError) {
-            console.error("❌ Resend API Error (Forgot Password):", resendError);
-            
-            // Rollback database jika email gagal terkirim
+        try {
+            await transporter.sendMail(mailOptions);
+            res.status(200).json({ 
+                success: true, 
+                message: 'The reset password link has been sent to your email address. Please check your inbox.' 
+            });
+        } catch (emailError) {
+            console.error("❌ Forgot Password Email Error (Brevo):", emailError);
             user.resetPasswordToken = undefined;
             user.resetPasswordExpires = undefined;
             await user.save({ validateBeforeSave: false });
-            
-            return res.status(500).json({ success: false, message: "Gagal mengirim email reset password.", detail: resendError.message });
+            return res.status(500).json({ success: false, message: "A system error occurred while sending the email." });
         }
-
-        console.log("✅ Email terkirim via Resend. ID:", data?.id);
-        res.status(200).json({ 
-            success: true, 
-            message: 'The reset password link has been sent to your email address. Please check your inbox.' 
-        });
 
     } catch (error) {
-        console.error("Forgot Password System Error:", error);
-        
-        // Jika gagal karena error sistem, bersihkan kembali token di database
-        if (req.body.email) {
-            const user = await User.findOne({ email: req.body.email });
-            if (user) {
-                user.resetPasswordToken = undefined;
-                user.resetPasswordExpires = undefined;
-                await user.save({ validateBeforeSave: false });
-            }
-        }
-        res.status(500).json({ success: false, message: "Terjadi kesalahan sistem saat mengirim email." });
+        console.error("Forgot Password Error:", error);
+        res.status(500).json({ success: false, message: "A system error occurred." });
     }
 };
 
@@ -556,24 +524,25 @@ exports.resetPassword = async (req, res) => {
         const { email, token, newPassword } = req.body;
 
         if (!token || !newPassword || !email) {
-            return res.status(400).json({ success: false, message: 'Data tidak lengkap.' });
+            return res.status(400).json({ success: false, message: 'Incomplete data.' });
         }
 
         // 1. Lakukan hash pada token mentah yang diterima dari user
         const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const cleanEmail = email.trim().toLowerCase();
 
         // 2. Cari user berdasarkan email dan hash token, pastikan belum kedaluwarsa
         // Tambahkan .select('+resetPasswordToken') karena tadi kita set select: false di model
         const user = await User.findOne({
-            email: email.toLowerCase(),
+            email: cleanEmail,
             resetPasswordToken: resetTokenHash,
             resetPasswordExpires: { $gt: Date.now() }
-        }).select('+resetPasswordToken');
+        });
 
         if (!user) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Tautan reset password tidak valid atau sudah kedaluwarsa.'
+                message: 'The reset password link is invalid or has expired.'
             });
         }
 
@@ -587,7 +556,7 @@ exports.resetPassword = async (req, res) => {
 
         res.status(200).json({ 
             success: true, 
-            message: 'Password berhasil diubah. Silakan login menggunakan password baru.' 
+            message: 'Password changed successfully. Please login with your new password.' 
         });
 
     } catch (error) {
@@ -755,6 +724,30 @@ exports.verifyEmail = async (req, res) => {
     res.status(200).send('<h2 style="color:green; text-align:center;">Verification Successful! Please log in to your Lancs IoT app.</h2>');
   } catch (error) {
     console.error('🔥 Error Verifikasi Email:', error);
+    res.status(500).send('Error processing verification');
+  }
+};
+
+exports.verifyResetToken = async (req, res) => {
+  try {
+    const tokenHash = crypto.createHash('sha256').update(req.params.token).digest('hex');
+    const user = await User.findOne({ 
+      resetPasswordToken: tokenHash, 
+      resetPasswordExpires: { $gt: Date.now() } 
+    });
+
+    if (!user) {
+      return res.status(400).send('<h2 style="color:red; text-align:center;">Verifikasi Gagal: Tautan tidak valid atau telah kedaluwarsa.</h2>');
+    }
+
+    res.status(200).send(`
+      <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+        <h2 style="color:green;">Verifikasi Reset Password Berhasil!</h2>
+        <p>Silakan kembali ke aplikasi Lancs IoT Anda untuk memasukkan kata sandi baru.</p>
+      </div>
+    `);
+  } catch (error) {
+    console.error('🔥 Error Verify Reset Token:', error);
     res.status(500).send('Error processing verification');
   }
 };

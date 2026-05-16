@@ -1,8 +1,8 @@
 // server.js
 require("dotenv").config();
 
-console.log("🔍 CEK EMAIL:", process.env.EMAIL_USER);
-console.log("🔍 CEK PASS:", process.env.EMAIL_PASS ? "PASSWORD TERBACA" : "PASSWORD KOSONG/UNDEFINED");
+console.log("🔍 CEK EMAIL:", process.env.SMTP_USER);
+console.log("🔍 CEK PASS:", process.env.SMTP_PASS ? "PASSWORD TERBACA" : "PASSWORD KOSONG/UNDEFINED");
 
 const express = require("express");
 const cors = require("cors");
