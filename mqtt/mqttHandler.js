@@ -77,70 +77,102 @@ class MQTTHandler {
 
   async processSensorData(data) {
     try {
-      const { ServerID, Suhu, Kelembapan } = data;
+      // 1. Tampilkan JSON asli yang masuk dari MQTT / ESP32
+      console.log("\n📥 [MQTT IN] JSON mentah dari ESP32:");
+      console.log(JSON.stringify(data, null, 2));
+      
+      // Ekstrak 'Waktu' (sesuai nama variabel yang dikirim dari ESP32 teman Anda)
+      const { ServerID, Suhu, Kelembapan, Waktu } = data;
 
       if (!ServerID || Suhu === undefined || Kelembapan === undefined) {
-        console.error('❌ Data tidak lengkap (ServerID, Suhu, Kelembapan wajib ada)');
+        console.error('❌ Data tidak lengkap');
         return;
       }
 
       // =========================================================
-      // 🤖 FITUR AUTO-REGISTER ALAT BARU
+      // 2. EMIT LANGSUNG KE FLUTTER (LIVE STREAM)
       // =========================================================
-      let deviceData = await Device.findOne({ serialID: ServerID });
-      
-      if (!deviceData) {
-        console.log(`✨ Alat baru terdeteksi (${ServerID})! Mendaftarkan ke database...`);
-        deviceData = new Device({
-            serialID: ServerID,
-            name: `Sensor ${ServerID}`,
-            isClaimed: false, // Status: Siap diklaim via NFC
-            siteID: null,
-            devicePassword: null
-        });
-        await deviceData.save();
-        console.log(`✅ Alat ${ServerID} berhasil didaftarkan.`);
-      }
-      // =========================================================
+      if (global.io) {
+        // Rakit payload JSON
+        const socketPayload = {
+          id: ServerID,
+          temperature: Suhu,
+          humidity: Kelembapan,
+          // Mengirimkan mentah-mentah apa pun yang dikirim alat (misal: "14:30:00")
+          lastUpdated: Waktu || this.getWIBTime().toISOString() 
+        };
 
-      const waktu = this.getWIBTime();
-      const checksum = this.calculateChecksum(ServerID, Suhu, Kelembapan, waktu.toISOString());
+        // Tampilkan JSON yang akan ditembakkan ke Flutter
+        console.log("📤 [SOCKET OUT] JSON dikirim ke Flutter:");
+        console.log(JSON.stringify(socketPayload, null, 2));
+
+        // Tembakkan langsung!
+        global.io.emit(`update_${ServerID}`, socketPayload);
+      }
+
+      // =========================================================
+      // 3. MERAKIT TANGGAL UNTUK DATABASE & CHECKSUM
+      // =========================================================
+      let waktuUntukDB = new Date(); // Fallback ke waktu server UTC saat ini
+
+      if (Waktu && typeof Waktu === 'string' && Waktu.includes(':')) {
+        // Karena alat hanya mengirim Jam (HH:MM:SS), kita harus menempelkan tanggal hari ini.
+        // Kita ambil tanggal hari ini khusus dalam zona waktu Jakarta (WIB)
+        const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }); 
+        const dateStringWIB = formatter.format(new Date()); // Menghasilkan "YYYY-MM-DD"
+        
+        // Gabungkan tanggal, jam dari alat, dan penanda +07:00 (WIB)
+        const isoStringWIB = `${dateStringWIB}T${Waktu}+07:00`; // Contoh: "2026-05-21T14:30:00+07:00"
+        
+        // Node.js akan otomatis menerjemahkan string ini menjadi UTC murni yang valid
+        const parsedDate = new Date(isoStringWIB);
+        if (!isNaN(parsedDate.getTime())) {
+          waktuUntukDB = parsedDate; 
+        }
+      }
+
+      // Buat checksum menggunakan waktu valid yang sudah dirakit
+      const checksum = this.calculateChecksum(ServerID, Suhu, Kelembapan, waktuUntukDB.toISOString());
 
       const sensorDataToSave = {
         ServerID: ServerID,
         RealID: data.RealID || "-",
         Suhu: parseFloat(Suhu),
         Kelembapan: parseFloat(Kelembapan),
-        Waktu: waktu,
+        Waktu: waktuUntukDB, // Aman dimasukkan ke MongoDB
         Checksum: checksum,
         source: 'mqtt'
       };
 
-      // Simpan langsung ke MongoDB Mongoose (Tanpa Axios!)
+      // Simpan ke MongoDB Mongoose
       const SensorModel = getSensorModel(ServerID);
       const newSensorData = new SensorModel(sensorDataToSave);
       await newSensorData.save();
       
-      if (global.io) {
-        global.io.emit(`update_${ServerID}`, {
-          id: ServerID,
-          temperature: Suhu,
-          humidity: Kelembapan,
-          lastUpdated: waktu,
-        });
-      }
-      
-      console.log(`✅ Sukses tersimpan ke collection: sensor_${ServerID} | Suhu: ${Suhu}, Hum: ${Kelembapan}`);
+      console.log(`✅ Data MQTT (${ServerID}) -> Flutter: ${Waktu} | Database: ${waktuUntukDB.toISOString()}`);
 
-      const device = await Device.findOne({ serialID: ServerID });
+      // =========================================================
+      // 4. FITUR AUTO-REGISTER & NOTIFIKASI
+      // =========================================================
+      let device = await Device.findOne({ serialID: ServerID });
       
+      if (!device) {
+        console.log(`✨ Alat baru terdeteksi (${ServerID})! Mendaftarkan ke database...`);
+        device = new Device({
+            serialID: ServerID,
+            name: `Sensor ${ServerID}`,
+            isClaimed: false, 
+            siteID: null,
+            devicePassword: null
+        });
+        await device.save();
+      }
+
       if (device) {
-        // 1. UPDATE STATUS (BERLAKU UNTUK SEMUA ALAT)
         device.lastActive = new Date();
         device.isOnline = true;
         await device.save();
 
-        // 2. LOGIKA ALARM/NOTIFIKASI (Hanya jika alat sudah dimasukkan ke Site)
         if (device.siteId) {
           let alertType = null;
           let title = '';
@@ -177,50 +209,29 @@ class MQTTHandler {
                       title: title,
                       message: message
                   });
-                  console.log(`⚠️ ALARM MQTT TERPICU: ${title} pada ${device.name || ServerID}`);
               }
           }
         }
       }
 
-      // Kirim balasan ke ESP8266
+      // Kirim balasan ke ESP32
       this.publish(`LancsSK/ack/${ServerID}`, JSON.stringify({
         status: 'success',
-        message: 'Data saved directly to MongoDB',
-        timestamp: new Date().toISOString()
+        message: 'Data saved directly to MongoDB'
       }));
 
     } catch (error) {
       console.error('❌ Error processing sensor data:', error.message);
-      if (data && data.ServerID) {
-        this.publish(`LancsSK/ack/${data.ServerID}`, JSON.stringify({
-          status: 'error',
-          message: 'Database save failed: ' + error.message,
-          timestamp: new Date().toISOString()
-        }));
-      }
     }
   }
 
+  // JANGAN DIHAPUS: Fungsi ini wajib untuk mengirim respon kembali ke alat (ESP32)
   publish(topic, message) {
     if (this.mqttClient && this.mqttClient.connected) {
-      this.mqttClient.publish(topic, message, { qos: 0, retain: false });
+      this.mqttClient.publish(topic, message);
+    } else {
+      console.error('❌ Gagal Publish: MQTT belum terhubung.');
     }
-  }
-
-  sendCommand(sensorId, command) {
-    this.publish(`LancsSK/control/${sensorId}`, JSON.stringify({
-      ...command,
-      timestamp: new Date().toISOString(),
-      from: 'nodejs_server'
-    }));
-  }
-
-  getStatus() {
-    return this.mqttClient ? {
-      connected: this.mqttClient.connected,
-      broker: this.host
-    } : { connected: false };
   }
 }
 

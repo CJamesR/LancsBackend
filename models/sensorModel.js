@@ -22,7 +22,7 @@ const getSensorModel = (sensorID) => {
     }
   }, 
   { 
-    timestamps: false,
+    timestamps: true,
     collection: collectionName
   });
 
