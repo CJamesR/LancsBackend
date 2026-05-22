@@ -88,6 +88,10 @@ class MQTTHandler {
         console.error('❌ Data tidak lengkap');
         return;
       }
+      if (parseFloat(Suhu) === -888 || parseFloat(Kelembapan) === -888) {
+        console.warn(`⚠️ [Filter Aktiv] Mengabaikan data inisialisasi (-888) dari sensor ${ServerID}`);
+        return;
+      }
 
       // =========================================================
       // 2. EMIT LANGSUNG KE FLUTTER (LIVE STREAM)
