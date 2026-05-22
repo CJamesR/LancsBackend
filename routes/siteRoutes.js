@@ -38,6 +38,76 @@ router.get('/:siteId/members', protect, checkSiteRole(['owner', 'admin', 'member
 // Invite dengan RBAC ketat (Owner & Admin saja)
 router.post('/:siteId/invite', protect, siteController.inviteUser);
 
+// RENAME + UPDATE LOCATION SITE
+// PATCH /api/sites/:siteId
+router.patch('/:siteId', protect, checkSiteRole(['owner']), async (req, res) => {
+    try {
+        const { name, location } = req.body;
+        const userId = extractUserId(req);
+        const siteId = req.params.siteId;
+
+        // Validasi: Cegah update jika tidak ada data yang dikirim
+        if (!name && !location) {
+            return res.status(400).json({ success: false, message: 'Tidak ada data yang diubah' });
+        }
+
+        const site = await Site.findByIdAndUpdate(
+            siteId,
+            { ...(name && { name }), ...(location && { location }) },
+            { new: true }
+        );
+
+        if (!site) return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+
+        // 🔥 CATAT AKTIVITAS
+        let actionDesc = `Updated site details.`;
+        if (name && location) actionDesc = `Changed site name to ${name} and location to ${location}`;
+        else if (name) actionDesc = `Renamed site to ${name}`;
+        else if (location) actionDesc = `Changed site location to ${location}`;
+
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: actionDesc
+        });
+
+        res.json({ success: true, message: 'Site berhasil diupdate', data: site });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// LEAVE SITE (member/admin keluar sendiri)
+// DELETE /api/sites/:siteId/leave
+router.delete('/:siteId/leave', protect, async (req, res) => {
+    try {
+        const userId = extractUserId(req);
+        const siteId = req.params.siteId;
+
+        const site = await Site.findById(siteId);
+        if (!site) return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+        
+        if (site.ownerId.toString() === userId) {
+            return res.status(400).json({ success: false, message: 'Owner tidak bisa leave. Hapus site atau transfer ownership.' });
+        }
+
+        site.admins = site.admins.filter(a => a.userId.toString() !== userId);
+        site.members = (site.members || []).filter(m => m.userId.toString() !== userId);
+        await site.save();
+
+        // 🔥 CATAT AKTIVITAS
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: `Left the site`
+        });
+
+        res.json({ success: true, message: 'Berhasil keluar dari site.' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 // REMOVE DEVICE
 router.delete('/:siteId/devices/:deviceId', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
@@ -112,7 +182,7 @@ router.delete('/:siteId', protect, checkSiteRole(['owner']), async (req, res) =>
     }
 });
 
-// RENAME DEVICE (Fitur nomor 4 dari teman Anda)
+// RENAME DEVICE
 router.patch('/:siteId/devices/:deviceId/rename', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
         const { deviceId, siteId } = req.params;
