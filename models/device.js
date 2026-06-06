@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const deviceSchema = new mongoose.Schema({
     serialID: {type: String, required: true,unique: true},
-    name: {type: String, default: "New Device"},
+    name: {type: String, default: "New Gateway"},
     isClaimed: {type: Boolean, default: false},
     siteId: {type: mongoose.Schema.Types.ObjectId, ref: 'Site', default: null},
     

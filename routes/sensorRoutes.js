@@ -39,6 +39,6 @@ router.get('/:sensorId', protect, sensorController.getSensorData);
 router.get('/user/gateways', sensorController.getUserGateways);
 router.get('/available', sensorController.getAllSensors);
 router.get('/:sensorId/aggregated', sensorController.getAggregatedData);
-router.get('/latest/:sensorId', sensorController.getLatestSensorData);
+
 // JANGAN ada routes lain di file ini
 module.exports = router;

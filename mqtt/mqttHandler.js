@@ -1,23 +1,30 @@
-const mqtt = require('mqtt');
-const getSensorModel = require('../models/sensorModel'); 
-const Device = require('../models/device'); 
+const mqtt       = require('mqtt');
+const jwt        = require('jsonwebtoken');
+const getSensorModel = require('../models/sensorModel');
+const Device     = require('../models/device');       // model lama — tetap dipakai
+const Gateway    = require('../models/gatewayModel'); // model baru
+const Node       = require('../models/nodeModel');    // model baru
 const Notification = require('../models/notificationModel');
 
 class MQTTHandler {
   constructor() {
     this.mqttClient = null;
-    // Ganti ini dengan URL HiveMQ Cloud Anda nanti jika sudah pindah ke Private Broker
-    this.host = process.env.MQTT_BROKER; 
-    
+    this.host = process.env.MQTT_BROKER;
     console.log('🔗 MQTT Broker:', this.host);
   }
 
+  // =========================================================================
+  // UTILITAS
+  // =========================================================================
   getWIBTime() {
-    const now = new Date();
-    const wibOffset = 7 * 60 * 60 * 1000;
-    return new Date(now.getTime() + wibOffset);
+    return new Date(Date.now() + 7 * 60 * 60 * 1000);
   }
 
+  getStatus() {
+    return { connected: this.mqttClient ? this.mqttClient.connected : false };
+  }
+
+  // Algoritma checksum identik dengan checksumValidator.js dan firmware
   calculateChecksum(id, suhu, kelembapan, waktu) {
     const data = id + Number(suhu).toFixed(2) + Number(kelembapan).toFixed(2) + waktu;
     let hash = 0;
@@ -27,6 +34,9 @@ class MQTTHandler {
     return hash.toString(16).padStart(4, '0');
   }
 
+  // =========================================================================
+  // KONEKSI & SUBSCRIBE
+  // =========================================================================
   connect() {
     const options = {
       keepalive: 60,
@@ -41,201 +51,394 @@ class MQTTHandler {
     this.mqttClient = mqtt.connect(this.host, options);
 
     this.mqttClient.on('error', (err) => {
-      console.error('❌ MQTT Error:', err);
+      console.error('❌ MQTT Error:', err.message);
     });
 
     this.mqttClient.on('connect', () => {
       console.log('✅ Connected to MQTT Broker');
+      // Fase 1 Topik 1 — Otentikasi Gateway (QoS 1 karena penting)
+      this.mqttClient.subscribe('LancsSK/gateway/register', { qos: 1 });
+      // Fase 1 Topik 2 — Interupsi / perintah ke Gateway
+      this.mqttClient.subscribe('LancsSK/gateway/cmd', { qos: 0 });
+      // Fase 1 Topik 3 — Telemetri sensor dari Gateway
       this.mqttClient.subscribe('LancsSK/sensor/data', { qos: 0 });
+      this.mqttClient.subscribe('LancsSK/+/data', { qos: 0 });
+      // Topik legacy
       this.mqttClient.subscribe('LancsSK/status', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/device/status', { qos: 0 });
-      this.mqttClient.subscribe('LancsSK/+/data', { qos: 0 });
     });
 
     this.mqttClient.on('message', async (topic, message) => {
       try {
         await this.handleMessage(topic, message.toString());
       } catch (error) {
-        console.error('❌ Error handling MQTT message:', error);
+        console.error('❌ Error handling MQTT message:', error.message);
       }
     });
   }
 
+  // =========================================================================
+  // ROUTER PESAN — if/else if yang benar, tidak ada kebocoran antar topik
+  // =========================================================================
   async handleMessage(topic, message) {
+    let data;
     try {
-      const data = JSON.parse(message);
-      
-      if (topic === 'LancsSK/sensor/data' || (topic.startsWith('LancsSK/') && topic.endsWith('/data'))) {
-        await this.processSensorData(data);
-      } else if (topic === 'LancsSK/status' || topic === 'LancsSK/device/status') {
-        console.log('📊 Device Status:', data);
+      data = JSON.parse(message);
+    } catch {
+      console.error('❌ Pesan MQTT bukan JSON valid:', message);
+      return;
+    }
+
+    // Fase 1 Topik 1
+    if (topic === 'LancsSK/gateway/register') {
+      await this.handleGatewayRegister(data);
+
+    // Fase 1 Topik 2
+    } else if (topic === 'LancsSK/gateway/cmd') {
+      console.log('📥 [MQTT IN] Perintah Gateway:', data);
+      if (data.cmd === 'pairing_active') {
+        console.log(`🔄 Mode Pairing diaktifkan untuk Gateway: ${data.gateway_mac || 'broadcast'}`);
       }
-    } catch (error) {
-      console.error('❌ Error parsing MQTT message:', error);
+
+    // Fase 1 Topik 3
+    } else if (
+      topic === 'LancsSK/sensor/data' ||
+      (topic.startsWith('LancsSK/') && topic.endsWith('/data'))
+    ) {
+      await this.processSensorData(data);
+
+    // Status legacy
+    } else if (topic === 'LancsSK/status' || topic === 'LancsSK/device/status') {
+      console.log('📊 [MQTT] Device Status:', data);
     }
   }
 
+  // =========================================================================
+  // FASE 2 TUGAS 1 — MANAJEMEN OTORISASI GATEWAY
+  // Topik masuk : LancsSK/gateway/register
+  // Payload     : { gateway_mac: "GW-001", user_token: "<JWT>" }
+  // Hasil       : Gateway UPSERT di database, terikat ke ownerId
+  // =========================================================================
+  async handleGatewayRegister(data) {
+    const { gateway_mac, user_token } = data;
+    console.log(`\n📥 [MQTT IN] Registrasi Gateway: ${gateway_mac}`);
+
+    if (!gateway_mac || !user_token) {
+      console.warn('⚠️ Payload register tidak valid: gateway_mac atau user_token kosong.');
+      return;
+    }
+
+    // Verifikasi JWT — user_token adalah token yang sama dengan yang dipakai Flutter
+    let decodedToken;
+    try {
+      decodedToken = jwt.verify(user_token, process.env.JWT_SECRET);
+    } catch (err) {
+      console.error(`❌ Token Gateway [${gateway_mac}] tidak valid:`, err.message);
+      this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
+        status: 'error',
+        message: 'Token tidak valid atau kedaluwarsa. Silakan login ulang di aplikasi.'
+      }));
+      return;
+    }
+
+    const userId = decodedToken.userId;
+
+    try {
+      // UPSERT — aman diulang setiap Gateway reconnect
+      const gateway = await Gateway.findOneAndUpdate(
+        { mac: gateway_mac.toUpperCase() },
+        {
+          $set: {
+            ownerId: userId,
+            isOnline: true,
+            lastSeen: new Date(),
+            currentMode: 2
+          }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+
+      console.log(`✅ Gateway [${gateway_mac}] terdaftar → User: ${userId}`);
+
+      this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
+        status: 'success',
+        message: 'Gateway terdaftar. Mode 2 aktif.',
+        gatewayId: gateway._id.toString()
+      }));
+
+    } catch (dbErr) {
+      console.error(`❌ Gagal simpan Gateway [${gateway_mac}]:`, dbErr.message);
+      this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
+        status: 'error',
+        message: 'Kesalahan server saat menyimpan data gateway.'
+      }));
+    }
+  }
+
+  // =========================================================================
+  // FASE 2 TUGAS 2 & 3 — PROSES DATA SENSOR
+  // Topik masuk : LancsSK/sensor/data
+  // Payload     : { ServerID, RealID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon }
+  //
+  // ServerID = MAC Gateway (induk)
+  // RealID   = MAC Node sensor (anak)
+  //
+  // Tugas 2: Bangun relasi Node → Gateway di database (one-to-many)
+  // Tugas 3: Validasi Checksum sebelum data disimpan
+  // =========================================================================
   async processSensorData(data) {
     try {
-      // 1. Tampilkan JSON asli yang masuk dari MQTT / ESP32
-      console.log("\n📥 [MQTT IN] JSON mentah dari ESP32:");
+      console.log('\n📥 [MQTT IN] Data sensor:');
       console.log(JSON.stringify(data, null, 2));
-      
-      // Ekstrak 'Waktu' (sesuai nama variabel yang dikirim dari ESP32 teman Anda)
-      const { ServerID, Suhu, Kelembapan, Waktu } = data;
 
+      // Destructuring bersih — tidak ada duplikasi variabel
+      const { ServerID, RealID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon } = data;
+
+      // ── Validasi field wajib ────────────────────────────────────────────
       if (!ServerID || Suhu === undefined || Kelembapan === undefined) {
-        console.error('❌ Data tidak lengkap');
-        return;
-      }
-      if (parseFloat(Suhu) === -888 || parseFloat(Kelembapan) === -888) {
-        console.warn(`⚠️ [Filter Aktiv] Mengabaikan data inisialisasi (-888) dari sensor ${ServerID}`);
+        console.error('❌ Data tidak lengkap: ServerID, Suhu, atau Kelembapan kosong.');
         return;
       }
 
-      // =========================================================
-      // 2. EMIT LANGSUNG KE FLUTTER (LIVE STREAM)
-      // =========================================================
+      // ── Filter sinyal inisialisasi (-888) ──────────────────────────────
+      if (parseFloat(Suhu) === -888 || parseFloat(Kelembapan) === -888) {
+        console.warn(`⚠️ [Filter] Sinyal inisialisasi (-888) dari ${ServerID} diabaikan.`);
+        return;
+      }
+
+      // ── Rakit waktu untuk database ─────────────────────────────────────
+      // Firmware bisa kirim "HH:MM:SS" atau ISO penuh
+      let waktuUntukDB = new Date();
+
+      if (Waktu && typeof Waktu === 'string') {
+        if (Waktu.includes('T')) {
+          // Format ISO penuh
+          const parsed = new Date(Waktu);
+          if (!isNaN(parsed.getTime())) waktuUntukDB = parsed;
+        } else if (Waktu.includes(':')) {
+          // Format jam saja — gabungkan dengan tanggal WIB hari ini
+          const dateWIB = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+          const parsed = new Date(`${dateWIB}T${Waktu}+07:00`);
+          if (!isNaN(parsed.getTime())) waktuUntukDB = parsed;
+        }
+      }
+
+      // ── TUGAS 3: Validasi Checksum ─────────────────────────────────────
+      if (Checksum) {
+        const expected = this.calculateChecksum(
+          ServerID, Suhu, Kelembapan, waktuUntukDB.toISOString()
+        );
+        if (Checksum.toLowerCase() !== expected.toLowerCase()) {
+          console.error(`🚨 [Checksum GAGAL] ${ServerID} | diterima: ${Checksum} | diharapkan: ${expected}`);
+          this.publish(`LancsSK/ack/${ServerID}`, JSON.stringify({
+            status: 'error',
+            message: 'Checksum tidak cocok. Data ditolak.'
+          }));
+          return;
+        }
+        console.log(`✅ [Checksum OK] ${ServerID}`);
+      } else {
+        console.warn(`⚠️ Tidak ada checksum dari ${ServerID}, data tetap diproses.`);
+      }
+
+      // ── Emit real-time ke Flutter via Socket.IO ─────────────────────────
       if (global.io) {
-        // Rakit payload JSON
         const socketPayload = {
           id: ServerID,
+          realId: RealID || null,
           temperature: Suhu,
           humidity: Kelembapan,
-          // Mengirimkan mentah-mentah apa pun yang dikirim alat (misal: "14:30:00")
-          lastUpdated: Waktu || this.getWIBTime().toISOString() 
+          latitude: gps_lat || null,
+          longitude: gps_lon || null,
+          lastUpdated: waktuUntukDB.toISOString()
         };
-
-        // Tampilkan JSON yang akan ditembakkan ke Flutter
-        console.log("📤 [SOCKET OUT] JSON dikirim ke Flutter:");
-        console.log(JSON.stringify(socketPayload, null, 2));
-
-        // Tembakkan langsung!
+        console.log('📤 [SOCKET OUT]', JSON.stringify(socketPayload));
         global.io.emit(`update_${ServerID}`, socketPayload);
       }
 
-      // =========================================================
-      // 3. MERAKIT TANGGAL UNTUK DATABASE & CHECKSUM
-      // =========================================================
-      let waktuUntukDB = new Date(); // Fallback ke waktu server UTC saat ini
-
-      if (Waktu && typeof Waktu === 'string' && Waktu.includes(':')) {
-        // Karena alat hanya mengirim Jam (HH:MM:SS), kita harus menempelkan tanggal hari ini.
-        // Kita ambil tanggal hari ini khusus dalam zona waktu Jakarta (WIB)
-        const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }); 
-        const dateStringWIB = formatter.format(new Date()); // Menghasilkan "YYYY-MM-DD"
-        
-        // Gabungkan tanggal, jam dari alat, dan penanda +07:00 (WIB)
-        const isoStringWIB = `${dateStringWIB}T${Waktu}+07:00`; // Contoh: "2026-05-21T14:30:00+07:00"
-        
-        // Node.js akan otomatis menerjemahkan string ini menjadi UTC murni yang valid
-        const parsedDate = new Date(isoStringWIB);
-        if (!isNaN(parsedDate.getTime())) {
-          waktuUntukDB = parsedDate; 
-        }
-      }
-
-      // Buat checksum menggunakan waktu valid yang sudah dirakit
-      const checksum = this.calculateChecksum(ServerID, Suhu, Kelembapan, waktuUntukDB.toISOString());
-
-      const sensorDataToSave = {
-        ServerID: ServerID,
-        RealID: data.RealID || "-",
+      // ── Simpan time-series ke koleksi sensor_<ServerID> ────────────────
+      // Koleksi tetap dikey-kan ke ServerID (MAC Gateway) bukan RealID,
+      // karena satu Gateway bisa punya banyak node — data dari semua node
+      // yang lewat gateway yang sama masuk ke koleksi yang sama,
+      // dan dibedakan oleh field RealID di dalam dokumen.
+      const SensorModel = getSensorModel(ServerID);
+      await new SensorModel({
+        ServerID,
+        RealID: RealID || '-',
         Suhu: parseFloat(Suhu),
         Kelembapan: parseFloat(Kelembapan),
-        Waktu: waktuUntukDB, // Aman dimasukkan ke MongoDB
-        Checksum: checksum,
+        gps_lat: gps_lat != null ? parseFloat(gps_lat) : null,
+        gps_lon: gps_lon != null ? parseFloat(gps_lon) : null,
+        Waktu: waktuUntukDB,
+        Checksum: Checksum || null,
         source: 'mqtt'
-      };
+      }).save();
+      console.log(`✅ Data tersimpan → sensor_${ServerID} | Waktu: ${waktuUntukDB.toISOString()}`);
 
-      // Simpan ke MongoDB Mongoose
-      const SensorModel = getSensorModel(ServerID);
-      const newSensorData = new SensorModel(sensorDataToSave);
-      await newSensorData.save();
-      
-      console.log(`✅ Data MQTT (${ServerID}) -> Flutter: ${Waktu} | Database: ${waktuUntukDB.toISOString()}`);
+      // ── TUGAS 2: Bangun relasi Node → Gateway ──────────────────────────
+      // Hanya dijalankan jika RealID valid (bukan '-' atau kosong)
+      if (RealID && RealID !== '-') {
+        // Cari Gateway induk di database
+        const gateway = await Gateway.findOne({ mac: ServerID.toUpperCase() });
 
-      // =========================================================
-      // 4. FITUR AUTO-REGISTER & NOTIFIKASI
-      // =========================================================
-      let device = await Device.findOne({ serialID: ServerID });
-      
-      if (!device) {
-        console.log(`✨ Alat baru terdeteksi (${ServerID})! Mendaftarkan ke database...`);
-        device = new Device({
-            serialID: ServerID,
-            name: `Sensor ${ServerID}`,
-            isClaimed: false, 
-            siteID: null,
-            devicePassword: null
-        });
-        await device.save();
-      }
+        // UPSERT Node — jika node ini baru, daftarkan otomatis
+        const node = await Node.findOneAndUpdate(
+          { serialId: RealID.toUpperCase() },
+          {
+            $set: {
+              gatewayId: gateway ? gateway._id : null,
+              siteId: gateway ? gateway.siteId : null,
+              isOnline: true,
+              lastSeen: new Date(),
+              lastTemperature: parseFloat(Suhu),
+              lastHumidity: parseFloat(Kelembapan)
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
 
-      if (device) {
-        device.lastActive = new Date();
-        device.isOnline = true;
-        await device.save();
+        console.log(`🔗 [Relasi] Node ${RealID} → Gateway ${ServerID}${gateway ? ` (${gateway._id})` : ' (gateway belum terdaftar)'}`);
 
-        if (device.siteId) {
-          let alertType = null;
-          let title = '';
-          let message = '';
-
-          const maxT = device.maxTemp || 35;
-          const minT = device.minTemp || 15;
-
-          if (Suhu > maxT) {
-              alertType = 'ALERT_HIGH_TEMP';
-              title = 'Peringatan: Suhu Tinggi';
-              message = `Suhu ${Suhu}°C melebihi batas maksimum ${maxT}°C.`;
-          } else if (Suhu < minT) {
-              alertType = 'ALERT_LOW_TEMP';
-              title = 'Peringatan: Suhu Rendah';
-              message = `Suhu ${Suhu}°C di bawah batas minimum ${minT}°C.`;
-          }
-
-          if (alertType) {
-              const Notification = require('../models/notificationModel');
-              const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-              
-              const recentSpamCheck = await Notification.findOne({
-                  deviceId: ServerID,
-                  type: alertType,
-                  createdAt: { $gte: fifteenMinutesAgo }
-              });
-
-              if (!recentSpamCheck) {
-                  await Notification.create({
-                      siteId: device.siteId,
-                      deviceId: ServerID,
-                      type: alertType,
-                      title: title,
-                      message: message
-                  });
-              }
-          }
+        // Alarm suhu per-node
+        if (node.siteId) {
+          await this.checkAndCreateAlert(node, parseFloat(Suhu), RealID);
         }
       }
 
-      // Kirim balasan ke ESP32
+      // ── Perbarui status Gateway (Device lama juga diupdate untuk kompatibilitas) ──
+      await this.updateGatewayStatus(ServerID, parseFloat(Suhu));
+
+      // ── ACK ke Gateway ──────────────────────────────────────────────────
       this.publish(`LancsSK/ack/${ServerID}`, JSON.stringify({
         status: 'success',
-        message: 'Data saved directly to MongoDB'
+        message: 'Data diterima dan disimpan.'
       }));
 
     } catch (error) {
-      console.error('❌ Error processing sensor data:', error.message);
+      console.error('❌ Error processSensorData:', error.message);
     }
   }
 
-  // JANGAN DIHAPUS: Fungsi ini wajib untuk mengirim respon kembali ke alat (ESP32)
+  // =========================================================================
+  // HELPER: Perbarui status Gateway di model baru DAN Device lama
+  // =========================================================================
+  async updateGatewayStatus(serverID, suhu) {
+    // Update Gateway model baru
+    await Gateway.findOneAndUpdate(
+      { mac: serverID.toUpperCase() },
+      { $set: { isOnline: true, lastSeen: new Date() } }
+    );
+
+    // Update Device lama (backward compatibility untuk statusChecker, siteRoutes, dll)
+    let device = await Device.findOne({ serialID: serverID });
+    if (!device) {
+      console.log(`✨ Gateway baru di Device lama (${serverID}). Mendaftarkan...`);
+      device = await Device.create({
+        serialID: serverID,
+        name: `Gateway ${serverID}`,
+        isClaimed: false,
+        siteId: null,
+        devicePassword: null
+      });
+    }
+    device.lastActive = new Date();
+    device.isOnline = true;
+    await device.save();
+
+    // Alarm suhu di level Gateway (jika sudah diklaim ke site)
+    if (device.siteId) {
+      await this.checkAndCreateAlert(
+        { siteId: device.siteId, minTemp: device.minTemp, maxTemp: device.maxTemp },
+        suhu,
+        serverID
+      );
+    }
+  }
+
+  // =========================================================================
+  // HELPER: Cek batas suhu dan buat notifikasi jika perlu
+  // =========================================================================
+  async checkAndCreateAlert(entity, suhu, deviceId) {
+    const maxT = entity.maxTemp || 35;
+    const minT = entity.minTemp || 15;
+    let alertType = null, title = '', message = '';
+
+    if (suhu > maxT) {
+      alertType = 'ALERT_HIGH_TEMP';
+      title = 'Peringatan: Suhu Tinggi';
+      message = `Suhu ${suhu}°C melebihi batas maksimum ${maxT}°C.`;
+    } else if (suhu < minT) {
+      alertType = 'ALERT_LOW_TEMP';
+      title = 'Peringatan: Suhu Rendah';
+      message = `Suhu ${suhu}°C di bawah batas minimum ${minT}°C.`;
+    }
+
+    if (!alertType) return;
+
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const alreadyNotified = await Notification.findOne({
+      deviceId,
+      type: alertType,
+      createdAt: { $gte: fifteenMinutesAgo }
+    });
+
+    if (!alreadyNotified) {
+      await Notification.create({
+        siteId: entity.siteId,
+        deviceId,
+        type: alertType,
+        title,
+        message
+      });
+      console.log(`⚠️ [Alarm] ${title} pada ${deviceId}`);
+    }
+  }
+
+  // =========================================================================
+  // PUBLISH — Kirim pesan ke MQTT broker
+  // =========================================================================
   publish(topic, message) {
     if (this.mqttClient && this.mqttClient.connected) {
       this.mqttClient.publish(topic, message);
     } else {
-      console.error('❌ Gagal Publish: MQTT belum terhubung.');
+      console.error('❌ Gagal Publish: MQTT tidak terhubung.');
     }
+  }
+
+  // =========================================================================
+  // FASE 1 TOPIK 2 — Kirim perintah ke Gateway via MQTT
+  // Dipanggil oleh endpoint: POST /api/flutter/gateway/:mac/cmd
+  //
+  // Perintah yang didukung saat ini:
+  //   pairing_active — aktifkan mode BLE pairing di Gateway
+  //   set_wifi       — update kredensial WiFi Gateway (hanya berlaku jika
+  //                    Gateway sudah online via WiFi sebelumnya)
+  //
+  // Catatan: provisioning WiFi PERTAMA KALI tidak lewat sini.
+  // Alur awal: Gateway buka AP → Flutter connect langsung ke AP Gateway →
+  // Flutter POST credentials ke Gateway (HTTP ke 192.168.4.1) → Gateway
+  // connect ke WiFi → Gateway online → baru endpoint ini bisa dipakai
+  // untuk update credentials berikutnya.
+  //
+  // @param {string} gatewayMac  - MAC address Gateway tujuan
+  // @param {string} cmd         - 'pairing_active' | 'set_wifi'
+  // @param {object} extraPayload - field tambahan, misal { ssid, password }
+  // =========================================================================
+  sendGatewayCommand(gatewayMac, cmd, extraPayload = {}) {
+    if (!this.mqttClient || !this.mqttClient.connected) {
+      console.error('❌ Gagal kirim perintah: MQTT tidak terhubung.');
+      return false;
+    }
+
+    const payload = JSON.stringify({
+      cmd,
+      gateway_mac: gatewayMac || null,
+      ...extraPayload          // field tambahan masuk di sini (ssid, password, dll)
+    });
+
+    this.mqttClient.publish('LancsSK/gateway/cmd', payload, { qos: 1 });
+    console.log(`📤 [MQTT OUT] Perintah '${cmd}' → Gateway: ${gatewayMac || 'broadcast'}`);
+    return true;
   }
 }
 

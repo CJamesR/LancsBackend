@@ -181,7 +181,7 @@ exports.login = async (req, res) => {
   let user;
   try {
     console.log('🔐 LOGIN Request:', req.body);
-    const { identifier, password } = req.body;
+    const { identifier, password, deviceId } = req.body;
 
     // Validasi input
     if (!identifier || !password) {
@@ -191,10 +191,9 @@ exports.login = async (req, res) => {
       });
     }
 
-    // PERBAIKAN KRITIS: Gunakan .lean() untuk menghindari mongoose document overhead
     user = await User.findOne({ $or: [{ email: identifier }, { username: identifier }] })
-      .select('+password username email role isActive isVerified ') // ✅ Explicit select
-      .lean(); // ✅ Tambah .lean() untuk plain object
+      .select('+password username email role isActive isVerified ')
+      .lean();
 
     if (!user) {
       console.log('❌ User not found with email/username:', identifier);
@@ -228,6 +227,62 @@ exports.login = async (req, res) => {
         message: 'Email has not been verified. Please check your email for verification.'
       });
     }
+
+    // // ====================================================================
+    // // LOGIKA DEVICE FINGERPRINTING & OTP
+    // // ====================================================================
+    // const currentTime = new Date();
+    // const isFirstLogin = !user.trustedDevices || user.trustedDevices.length === 0;
+    
+    // let isDeviceTrusted = false;
+
+    // if (isFirstLogin) {
+    //   // Auto-trust untuk login pertama
+    //   isDeviceTrusted = true;
+    //   const expiry = new Date(currentTime.getTime() + 30 * 24 * 60 * 60 * 1000); // Masa aktif 30 Hari
+    //   await User.updateOne(
+    //     { _id: user._id }, 
+    //     { $push: { trustedDevices: { deviceId: deviceId, expiresAt: expiry } } }
+    //   );
+    // } else {
+    //   // Cek apakah deviceId ini ada di daftar dan belum kedaluwarsa
+    //   const knownDevice = user.trustedDevices.find(d => d.deviceId === deviceId && d.expiresAt > currentTime);
+    //   if (knownDevice) isDeviceTrusted = true;
+    // }
+
+    // if (!isDeviceTrusted) {
+    //   // 🚨 PERANGKAT BARU / SESI HABIS -> KIRIM OTP VIA BREVO
+    //   const generatedOtp = crypto.randomInt(100000, 999999).toString();
+      
+    //   await User.updateOne({ _id: user._id }, {
+    //     otpCode: generatedOtp,
+    //     otpExpires: new Date(currentTime.getTime() + 10 * 60000) // OTP hangus dalam 10 menit
+    //   });
+
+    //   const mailOptions = {
+    //     from: '"Lancs IoT Security" <calvinriyono@gmail.com>',
+    //     to: user.email,
+    //     subject: 'Kode OTP Login Anda',
+    //     html: `
+    //       <div style="font-family: sans-serif; text-align: center;">
+    //         <h2>Verifikasi Perangkat Baru</h2>
+    //         <p>Kami mendeteksi upaya login dari perangkat yang belum dikenali.</p>
+    //         <h1 style="letter-spacing: 5px; color: #4CAF50;">${generatedOtp}</h1>
+    //         <p>Masukkan kode OTP 6 digit ini di aplikasi. Kode berlaku selama 10 menit.</p>
+    //       </div>
+    //     `
+    //   };
+
+    //   await transporter.sendMail(mailOptions);
+    //   console.log(`📧 OTP Email terkirim via Brevo ke: ${user.email}`);
+
+    //   // Status 206 memberitahu Flutter untuk pindah ke layar input OTP
+    //   return res.status(206).json({ 
+    //     success: true, 
+    //     requires_otp: true, 
+    //     message: "New device detected. OTP has been sent to your email." 
+    //   });
+    // }
 
     const token = generateToken(user._id, user.role);
     const username = user.username || user.email.split('@')[0] || 'User';
@@ -442,9 +497,16 @@ exports.changePassword = async (req, res) => {
 // @access  Private
 exports.logout = async (req, res) => {
   try {
-    await User.findByIdAndUpdate(req.user.userId, {
-      refreshToken: null
-    });
+    const {deviceId} = req.body;
+    const updateQuery = { $set: { refreshToken: null } };
+
+    if (deviceId) {
+      updateQuery.$pull = { trustedDevices: { deviceId: deviceId } };
+    }
+    await User.findByIdAndUpdate(req.user.userId, updateQuery);
+    // await User.findByIdAndUpdate(req.user.userId, {
+    //   refreshToken: null
+    // });
 
     res.json({
       message: 'Logout successful'
@@ -751,3 +813,69 @@ exports.verifyResetToken = async (req, res) => {
     res.status(500).send('Error processing verification');
   }
 };
+
+// @desc    Verifikasi OTP Login & Daftarkan Perangkat
+// @route   POST /api/auth/verify-login-otp
+// @access  Public
+// exports.verifyLoginOtp = async (req, res) => {
+//   try {
+//     const { identifier, password, deviceId, otp } = req.body;
+
+//     if (!identifier || !password || !deviceId || !otp) {
+//       return res.status(400).json({ success: false, message: 'Incomplete data' });
+//     }
+
+//     // Ekstrak data mentah
+//     const user = await User.findOne({ $or: [{ email: identifier }, { username: identifier }] }).select('+password otpCode otpExpires');
+//     if (!user) return res.status(404).json({ success: false, message: 'User Not Found' });
+
+//     // Validasi ulang password sebagai lapisan keamanan (mencegah brute-force OTP API)
+//     const isPasswordValid = await user.comparePassword(password);
+//     if (!isPasswordValid) return res.status(401).json({ success: false, message: 'Invalid password' });
+
+//     const currentTime = new Date();
+
+//     // Validasi OTP
+//     if (user.otpCode !== otp || currentTime > user.otpExpires) {
+//       return res.status(401).json({ success: false, message: 'Invalid OTP code or expired' });
+//     }
+
+//     // OTP Benar -> Daftarkan perangkat ini
+//     const deviceExpiry = new Date(currentTime.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 hari
+
+//     // Hapus deviceId lama jika ada (menghindari duplikat array), lalu masukkan yang baru
+//     await User.updateOne(
+//       { _id: user._id },
+//       { 
+//         $pull: { trustedDevices: { deviceId: deviceId } } 
+//       }
+//     );
+
+//     await User.updateOne(
+//       { _id: user._id },
+//       { 
+//         $push: { trustedDevices: { deviceId: deviceId, expiresAt: deviceExpiry } },
+//         $set: { otpCode: null, otpExpires: null, lastOnline: new Date() } // Bersihkan OTP
+//       }
+//     );
+
+//     // Terbitkan Token
+//     const token = generateToken(user._id, user.role);
+
+//     res.json({ 
+//       success: true, 
+//       message: "Device verification successful.", 
+//       token: token,
+//       user: {
+//         _id: user._id,
+//         email: user.email,
+//         username: user.username,
+//         role: user.role
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('🔥 VERIFY OTP Error:', error);
+//     res.status(500).json({ success: false, message: 'Server error while verifying OTP.' });
+//   }
+// };

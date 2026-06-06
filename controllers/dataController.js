@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const getSensorModel = require('../models/sensorModel');
 const User = require('../models/userModel');
+const Site = require('../models/siteModel');
 
 const getAllowedDevicesIds = async (userId) => {
   const sites = await Site.find({
@@ -13,7 +14,7 @@ const getAllowedDevicesIds = async (userId) => {
       devicesIdsArray.push(...site.devices);
     } else {
       const adminRecord = site.admins.find(a => a.userId.toString() === userId.toString());
-      if (admin && adminRecord.allowedDevices){
+      if (adminRecord && adminRecord.allowedDevices){
         devicesIdsArray.push(...adminRecord.allowedDevices);
       }
     }

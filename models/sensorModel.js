@@ -14,6 +14,8 @@ const getSensorModel = (sensorID) => {
     RealID: { type: String, required: true },
     Suhu: { type: Number, required: true },
     Kelembapan: { type: Number, required: true },
+    gps_lat: { type: Number, default: null },
+    gps_lon: { type: Number, default: null },
     Waktu: { 
       type: Date, 
       required: true,

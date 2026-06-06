@@ -69,7 +69,15 @@ const userSchema = new mongoose.Schema({
     isActive: { type: Boolean, default: true }
   },
   resetPasswordToken: {type: String, select: false},
-  resetPasswordExpires: { type: Date}
+  resetPasswordExpires: { type: Date},
+
+  otpCode: { type: String, default: null },
+  otpExpires: { type: Date, default: null },
+  trustedDevices: [{
+    deviceId: {type: String, default: null},
+    addedAt: { type: Date, default: Date.now},
+    expiresAt: { type: Date, required: true}
+  }]
 }, {
   timestamps: true
 });
