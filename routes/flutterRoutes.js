@@ -611,4 +611,154 @@ router.get('/gateway/:mac/nodes', async (req, res) => {
     }
 });
 
+// =========================================================================
+// 1. RENAME GATEWAY
+// PATCH /api/flutter/gateway/:mac/rename
+// =========================================================================
+router.patch('/gateway/:mac/rename', protect, apiLimiter, async (req, res) => {
+    try {
+        const { mac } = req.params;
+        const { newName } = req.body;
+        const userId = extractUserId(req);
+
+        if (!newName || newName.trim() === '') {
+            return res.status(400).json({ success: false, message: 'Nama baru tidak boleh kosong.' });
+        }
+
+        const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
+        if (!gateway) {
+            return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan.' });
+        }
+
+        // Otorisasi: Hanya pemilik Gateway yang boleh mengubah nama
+        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) {
+            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda bukan pemilik Gateway ini.' });
+        }
+
+        gateway.name = newName.trim();
+        await gateway.save();
+
+        res.json({ 
+            success: true, 
+            message: 'Nama Gateway berhasil diperbarui.',
+            data: { mac: gateway.mac, name: gateway.name }
+        });
+
+    } catch (error) {
+        console.error('❌ Error Rename Gateway:', error.message);
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+    }
+});
+
+// =========================================================================
+// 2. RENAME NODE
+// PATCH /api/flutter/node/:serialId/rename
+// =========================================================================
+router.patch('/node/:serialId/rename', protect, apiLimiter, async (req, res) => {
+    try {
+        const { serialId } = req.params;
+        const { newName } = req.body;
+        const userId = extractUserId(req);
+
+        if (!newName || newName.trim() === '') {
+            return res.status(400).json({ success: false, message: 'Nama baru tidak boleh kosong.' });
+        }
+
+        // populate('gatewayId') digunakan untuk mengambil data Induk secara bersamaan
+        const node = await Node.findOne({ serialId: serialId.toUpperCase() }).populate('gatewayId');
+        
+        if (!node) {
+            return res.status(404).json({ success: false, message: 'Node tidak ditemukan.' });
+        }
+
+        // Otorisasi: Cek apakah user adalah pemilik dari Gateway induk
+        const gateway = node.gatewayId;
+        if (!gateway || !gateway.ownerId || gateway.ownerId.toString() !== userId) {
+            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda bukan pemilik jaringan Node ini.' });
+        }
+
+        node.name = newName.trim();
+        await node.save();
+
+        res.json({ 
+            success: true, 
+            message: 'Nama Node berhasil diperbarui.',
+            data: { serialId: node.serialId, name: node.name }
+        });
+
+    } catch (error) {
+        console.error('❌ Error Rename Node:', error.message);
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+    }
+});
+
+// =========================================================================
+// 3. DETAIL NODE (Riwayat 24 Jam)
+// GET /api/flutter/node/:serialId/detail
+// =========================================================================
+router.get('/node/:serialId/detail', protect, async (req, res) => {
+    try {
+        const { serialId } = req.params;
+        const userId = extractUserId(req);
+
+        // 1. Cari Node dan muat data Gateway induknya
+        const node = await Node.findOne({ serialId: serialId.toUpperCase() }).populate('gatewayId');
+        if (!node) {
+            return res.status(404).json({ success: false, message: 'Node tidak ditemukan.' });
+        }
+
+        const gateway = node.gatewayId;
+        if (!gateway) {
+            return res.status(400).json({ success: false, message: 'Inkonsistensi Data: Node belum terikat ke Gateway manapun.' });
+        }
+
+        // 2. Validasi Kepemilikan (Atau Hak Akses Site)
+        if (gateway.ownerId.toString() !== userId) {
+            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda tidak memiliki akses ke Node ini.' });
+        }
+
+        // 3. Ambil data historis 24 jam terakhir dari koleksi dinamis Mongoose
+        // Ingat: Tabel dibentuk berdasarkan MAC Induk (Gateway), datanya difilter berdasarkan RealID (Node)
+        const SensorModel = getSensorModel(gateway.mac);
+        const timeAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+        const historyData = await SensorModel.find({
+            ServerID: gateway.mac,       // Induk
+            RealID: node.serialId,       // Anak spesifik
+            Waktu: { $gte: timeAgo }
+        })
+        .sort({ Waktu: 1 }) // Urutkan dari yang paling lama ke terbaru untuk chart
+        .select('Suhu Kelembapan Waktu gps_lat gps_lon -_id')
+        .lean();
+
+        // 4. Format keluaran sesuai yang dibutuhkan Flutter
+        const history24h = historyData.map(doc => ({
+            temperature: doc.Suhu,
+            humidity: doc.Kelembapan,
+            timestamp: doc.Waktu,
+            latitude: doc.gps_lat,
+            longitude: doc.gps_lon
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                nodeId: node._id,
+                serialId: node.serialId,
+                name: node.name || node.serialId,
+                gatewayMac: gateway.mac,
+                status: node.isOnline ? 'online' : 'offline',
+                currentTemperature: node.lastTemperature,
+                currentHumidity: node.lastHumidity,
+                lastSeen: node.lastSeen,
+                history24h: history24h
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error Get Node Detail:', error);
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan internal server saat memuat riwayat data.' });
+    }
+});
+
 module.exports = router;
