@@ -853,32 +853,53 @@ router.get('/gateways', protect, async (req, res) => {
     }
 });
 
-// =========================================================================
-// HOMEWORK 3: NODE PAIRING COMMAND ENDPOINT
-// Endpoint: POST /api/flutter/gateways/:mac/pair-node
-// =========================================================================
-router.post('/gateways/:mac/pair-node', protect, async (req, res) => {
+router.post('/gateway/:mac/command', protect, apiLimiter, async (req, res) => {
     try {
+        // 1. Ekstraksi parameter dari URL dan Body
         const { mac } = req.params;
+        const { cmd, ...extraPayload } = req.body; 
         const userId = extractUserId(req);
 
-        const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
-        if (!gateway || gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Gateway tidak ditemukan atau Anda tidak memiliki akses.' });
+        // Validasi input
+        if (!cmd) {
+            return res.status(400).json({ success: false, message: 'Parameter "cmd" wajib disertakan di dalam body request.' });
         }
 
-        // Eksekusi instruksi MQTT ke Gateway
-        const success = mqttHandler.sendGatewayCommand(gateway.mac, 'pairing_active');
+        // 2. Keamanan & Validasi Relasi di MongoDB
+        const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
+        
+        if (!gateway) {
+            return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan di pangkalan data.' });
+        }
 
-        if (success !== false) {
-            res.json({ success: true, message: 'Perintah pairing berhasil dikirim ke Gateway.' });
+        // Otorisasi Absolut: Hanya pemilik yang bisa mengirim perintah ke alat ini
+        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Akses Ditolak: Anda tidak memiliki otoritas atas Gateway ini.' 
+            });
+        }
+
+        // 3. Eksekusi: Meneruskan perintah ke MQTT Handler yang sudah direvisi
+        // Parameter extraPayload memungkinkan pengiriman data tambahan (seperti SSID/Password) jika diperlukan nantinya
+        const isDispatched = mqttHandler.sendGatewayCommand(gateway.mac, cmd, extraPayload);
+
+        // 4. Respons balikan ke klien Flutter
+        if (isDispatched) {
+            return res.status(200).json({ 
+                success: true, 
+                message: `Perintah '${cmd}' telah berhasil diinstruksikan ke Gateway.` 
+            });
         } else {
-            res.status(503).json({ success: false, message: 'Koneksi MQTT terputus, instruksi tidak dapat dikirim.' });
+            return res.status(503).json({ 
+                success: false, 
+                message: 'Gagal mengirim instruksi: Peladen saat ini terputus dari jaringan MQTT.' 
+            });
         }
 
     } catch (error) {
-        console.error('❌ Error Trigger Pairing:', error.message);
-        res.status(500).json({ success: false, message: 'Kesalahan internal server.' });
+        console.error(`❌ Error Gateway Command API [${req.params.mac}]:`, error.message);
+        res.status(500).json({ success: false, message: 'Kesalahan internal server saat memproses perintah.' });
     }
 });
 

@@ -424,20 +424,36 @@ class MQTTHandler {
   // @param {string} cmd         - 'pairing_active' | 'set_wifi'
   // @param {object} extraPayload - field tambahan, misal { ssid, password }
   // =========================================================================
+// =========================================================================
+  // FUNGSI PICUAN (TRIGGER) UNTUK REST API
+  // @param {string} gatewayMac  - MAC address Gateway tujuan (Wajib)
+  // @param {string} cmd         - Perintah eksekusi (contoh: 'pairing_active')
+  // @param {object} extraPayload - Field tambahan dinamis
+  // =========================================================================
   sendGatewayCommand(gatewayMac, cmd, extraPayload = {}) {
-    if (!this.mqttClient || !this.mqttClient.connected) {
-      console.error('❌ Gagal kirim perintah: MQTT tidak terhubung.');
+    // 1. Validasi Absolut: Cegah pengiriman tanpa arah rute yang spesifik
+    if (!gatewayMac) {
+      console.error('❌ [FATAL] Eksekusi dibatalkan: Target MAC Address Gateway tidak terdefinisi (null/kosong).');
       return false;
     }
 
+    if (!this.mqttClient || !this.mqttClient.connected) {
+      console.error('❌ Gagal kirim perintah: Peladen Node.js terputus dari broker MQTT.');
+      return false;
+    }
+
+    // 2. Hapus Parameter Payload: gateway_mac dicabut dari rakitan JSON
     const payload = JSON.stringify({
       cmd,
-      gateway_mac: gatewayMac || null,
-      ...extraPayload          // field tambahan masuk di sini (ssid, password, dll)
+      ...extraPayload 
     });
 
-    this.mqttClient.publish('LancsSK/gateway/cmd', payload, { qos: 1 });
-    console.log(`📤 [MQTT OUT] Perintah '${cmd}' → Gateway: ${gatewayMac || 'broadcast'}`);
+    // 3. Routing Dinamis: Topik disuntikkan langsung dengan MAC target
+    const targetTopic = `LancsSK/gateway/cmd/${gatewayMac}`;
+    
+    this.mqttClient.publish(targetTopic, payload, { qos: 1 });
+    console.log(`📤 [MQTT OUT] Transmisi perintah eksekusi '${cmd}' diluncurkan ke: ${targetTopic}`);
+    
     return true;
   }
 }
