@@ -761,4 +761,125 @@ router.get('/node/:serialId/detail', protect, async (req, res) => {
     }
 });
 
+// =========================================================================
+// HOMEWORK 1: ESP32 REGISTRATION ENDPOINT (HTTP POST)
+// Endpoint: POST /api/flutter/gateways/register
+// =========================================================================
+router.post('/gateways/register', async (req, res) => {
+    try {
+        const { serialId, user_token } = req.body;
+
+        if (!serialId || !user_token) {
+            return res.status(400).json({ success: false, message: 'serialId dan user_token wajib dikirim.' });
+        }
+
+        const jwt = require('jsonwebtoken');
+        let decoded;
+        try {
+            decoded = jwt.verify(user_token, process.env.JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({ success: false, message: 'Token otentikasi tidak valid atau kedaluwarsa.' });
+        }
+
+        // Lakukan UPSERT: Daftarkan Gateway atau perbarui kepemilikannya
+        const gateway = await Gateway.findOneAndUpdate(
+            { mac: serialId.toUpperCase() },
+            {
+                $set: {
+                    mac: serialId.toUpperCase(),
+                    ownerId: decoded.userId,
+                    isOnline: true,
+                    lastSeen: new Date()
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Gateway berhasil didaftarkan ke server Node.js', 
+            data: gateway 
+        });
+
+    } catch (error) {
+        console.error('❌ Error Gateway Registration via HTTP:', error.message);
+        res.status(500).json({ success: false, message: 'Kesalahan internal server.' });
+    }
+});
+
+// =========================================================================
+// HOMEWORK 2: FETCH GATEWAYS ENDPOINT
+// Endpoint: GET /api/flutter/gateways
+// =========================================================================
+router.get('/gateways', protect, async (req, res) => {
+    try {
+        const userId = extractUserId(req);
+
+        const gateways = await Gateway.find({ ownerId: userId }).lean();
+        const gatewayIds = gateways.map(gw => gw._id);
+        const nodes = await Node.find({ gatewayId: { $in: gatewayIds } }).lean();
+
+        // Rangkai data menjadi bentuk bersarang (nested JSON)
+        const formattedData = gateways.map(gw => {
+            const childNodes = nodes
+                .filter(n => n.gatewayId.toString() === gw._id.toString())
+                .map(n => ({
+                    id: n._id.toString(),
+                    name: n.name || n.serialId,
+                    serialId: n.serialId,
+                    temperature: n.lastTemperature,
+                    humidity: n.lastHumidity,
+                    status: n.isOnline ? 'online' : 'offline',
+                    lastUpdate: n.lastSeen
+                }));
+
+            return {
+                id: gw._id.toString(),
+                name: gw.name || gw.mac,
+                serialId: gw.mac,
+                status: gw.isOnline ? 'online' : 'offline',
+                nodes: childNodes
+            };
+        });
+
+        res.json({
+            success: true,
+            data: formattedData
+        });
+
+    } catch (error) {
+        console.error('❌ Error Fetch Gateways:', error.message);
+        res.status(500).json({ success: false, message: 'Gagal memuat data Gateway.' });
+    }
+});
+
+// =========================================================================
+// HOMEWORK 3: NODE PAIRING COMMAND ENDPOINT
+// Endpoint: POST /api/flutter/gateways/:mac/pair-node
+// =========================================================================
+router.post('/gateways/:mac/pair-node', protect, async (req, res) => {
+    try {
+        const { mac } = req.params;
+        const userId = extractUserId(req);
+
+        const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
+        if (!gateway || gateway.ownerId.toString() !== userId) {
+            return res.status(403).json({ success: false, message: 'Gateway tidak ditemukan atau Anda tidak memiliki akses.' });
+        }
+
+        // Eksekusi instruksi MQTT ke Gateway
+        const success = mqttHandler.sendGatewayCommand(gateway.mac, 'pairing_active');
+
+        if (success !== false) {
+            res.json({ success: true, message: 'Perintah pairing berhasil dikirim ke Gateway.' });
+        } else {
+            res.status(503).json({ success: false, message: 'Koneksi MQTT terputus, instruksi tidak dapat dikirim.' });
+        }
+
+    } catch (error) {
+        console.error('❌ Error Trigger Pairing:', error.message);
+        res.status(500).json({ success: false, message: 'Kesalahan internal server.' });
+    }
+});
+
 module.exports = router;
