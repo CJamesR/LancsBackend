@@ -5,6 +5,7 @@ const Device     = require('../models/device');       // model lama — tetap di
 const Gateway    = require('../models/gatewayModel'); // model baru
 const Node       = require('../models/nodeModel');    // model baru
 const Notification = require('../models/notificationModel');
+const Site       = require('../models/siteModel');   // untuk auto-assign gateway ke site saat registrasi
 
 class MQTTHandler {
   constructor() {
@@ -56,14 +57,10 @@ class MQTTHandler {
 
     this.mqttClient.on('connect', () => {
       console.log('✅ Connected to MQTT Broker');
-      // Fase 1 Topik 1 — Otentikasi Gateway (QoS 1 karena penting)
       this.mqttClient.subscribe('LancsSK/gateway/register', { qos: 1 });
-      // Fase 1 Topik 2 — Interupsi / perintah ke Gateway
       this.mqttClient.subscribe('LancsSK/gateway/cmd', { qos: 0 });
-      // Fase 1 Topik 3 — Telemetri sensor dari Gateway
       this.mqttClient.subscribe('LancsSK/sensor/data', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/+/data', { qos: 0 });
-      // Topik legacy
       this.mqttClient.subscribe('LancsSK/status', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/device/status', { qos: 0 });
     });
@@ -88,43 +85,28 @@ class MQTTHandler {
       console.error('❌ Pesan MQTT bukan JSON valid:', message);
       return;
     }
-
-    // Fase 1 Topik 1
     if (topic === 'LancsSK/gateway/register') {
       await this.handleGatewayRegister(data);
-
-    // Fase 1 Topik 2
     } else if (topic === 'LancsSK/gateway/cmd') {
       console.log('📥 [MQTT IN] Perintah Gateway:', data);
       if (data.cmd === 'pairing_active') {
         console.log(`🔄 Mode Pairing diaktifkan untuk Gateway: ${data.gateway_mac || 'broadcast'}`);
       }
-
-    // Fase 1 Topik 3
     } else if (
       topic === 'LancsSK/sensor/data' ||
       (topic.startsWith('LancsSK/') && topic.endsWith('/data'))
     ) {
       await this.processSensorData(data);
-
-    // Status legacy
     } else if (topic === 'LancsSK/status' || topic === 'LancsSK/device/status') {
       console.log('📊 [MQTT] Device Status:', data);
     }
   }
 
-  // =========================================================================
-  // FASE 2 TUGAS 1 — MANAJEMEN OTORISASI GATEWAY
-  // Topik masuk : LancsSK/gateway/register
-  // Payload     : { gateway_mac: "GW-001", user_token: "<JWT>" }
-  // Hasil       : Gateway UPSERT di database, terikat ke ownerId
-  // =========================================================================
-// =========================================================================
-  // PENDAFTARAN GATEWAY VIA MQTT + AUTO ASSIGNMENT
-  // =========================================================================
 async handleGatewayRegister(data) {
     const { gateway_mac, user_token, siteId } = data;
     console.log(`\n📥 [MQTT IN] Gateway Register: ${gateway_mac}`);
+
+    console.log(`🔍 [DEBUG] Payload received: siteId=${siteId || 'Tidak ada'}, token_length=${user_token ? user_token.length : 0}`);
 
     if (!gateway_mac || !user_token) {
       console.warn('⚠️ Payload register not valid: gateway_mac or user_token empty.');
@@ -132,18 +114,20 @@ async handleGatewayRegister(data) {
     }
 
     try {
-      const jwt = require('jsonwebtoken');
+      console.log(`🔍 [DEBUG] Memverifikasi JWT Token...`);
       const decoded = jwt.verify(user_token, process.env.JWT_SECRET);
       const userId = decoded.userId;
+      console.log(`✅ [DEBUG] Token Valid. Terjemahan userId: ${userId}`);
 
-      const Site = require('../models/siteModel');
       let actualSiteObjectId = null;
 
-      // Translasi ID Kustom ke ObjectId MongoDB
       if (siteId) {
-          const site = await Site.findOne({ siteId: siteId.toUpperCase() });
+        console.log(`🔍 [DEBUG] Mencari Site kustom dengan ID string: ${siteId}...`);
+          const site = await Site.findById(siteId);
           if (site) {
               actualSiteObjectId = site._id;
+              console.log(`✅ [DEBUG] Site ditemukan. Translasi berhasil: ObjectId(${actualSiteObjectId})`);
+              console.log(`🔄 [DEBUG] Menambahkan MAC ${gateway_mac.toUpperCase()} ke daftar devices di Site...`);
               await Site.findByIdAndUpdate(site._id, { $addToSet: { devices: gateway_mac.toUpperCase() } });
           }
       }
@@ -178,41 +162,22 @@ async handleGatewayRegister(data) {
       }));
     }
   }
-  // =========================================================================
-  // FASE 2 TUGAS 2 & 3 — PROSES DATA SENSOR
-  // Topik masuk : LancsSK/sensor/data
-  // Payload     : { ServerID, RealID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon }
-  //
-  // ServerID = MAC Gateway (induk)
-  // RealID   = MAC Node sensor (anak)
-  //
-  // Tugas 2: Bangun relasi Node → Gateway di database (one-to-many)
-  // Tugas 3: Validasi Checksum sebelum data disimpan
-  // =========================================================================
+
   async processSensorData(data) {
     try {
       console.log('\n📥 [MQTT IN] Data sensor:');
       console.log(JSON.stringify(data, null, 2));
 
-      // Destructuring bersih — tidak ada duplikasi variabel
       const { ServerID, RealID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon } = data;
-
-      // ── Validasi field wajib ────────────────────────────────────────────
       if (!ServerID || Suhu === undefined || Kelembapan === undefined) {
         console.error('❌ Data tidak lengkap: ServerID, Suhu, atau Kelembapan kosong.');
         return;
       }
-
-      // ── Filter sinyal inisialisasi (-888) ──────────────────────────────
       if (parseFloat(Suhu) === -888 || parseFloat(Kelembapan) === -888) {
         console.warn(`⚠️ [Filter] Sinyal inisialisasi (-888) dari ${ServerID} diabaikan.`);
         return;
       }
-
-      // ── Rakit waktu untuk database ─────────────────────────────────────
-      // Firmware bisa kirim "HH:MM:SS" atau ISO penuh
       let waktuUntukDB = new Date();
-
       if (Waktu && typeof Waktu === 'string') {
         if (Waktu.includes('T')) {
           // Format ISO penuh
@@ -226,7 +191,6 @@ async handleGatewayRegister(data) {
         }
       }
 
-      // ── TUGAS 3: Validasi Checksum ─────────────────────────────────────
       if (Checksum) {
         const expected = this.calculateChecksum(
           ServerID, Suhu, Kelembapan, waktuUntukDB.toISOString()

@@ -1,18 +1,8 @@
 const mongoose = require('mongoose');
 
 const siteSchema = new mongoose.Schema({
-    name: {type: String, required: true}, // Contoh: "Gudang Utama"
-    siteId: {
-        type: String,
-        required: true,
-        unique: true
-    },
+    name: {type: String, required: true},
     location: {type: String},
-    siteId: { 
-        type: String, 
-        required: true, 
-        unique: true 
-    },
     // 👑 PEMILIK UTAMA (Dulu adminId)
     ownerId: {
         type: mongoose.Schema.Types.ObjectId,

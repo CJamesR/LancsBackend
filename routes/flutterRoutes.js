@@ -32,84 +32,84 @@ const apiLimiter = rateLimiter({
     }
 });
 
-// // =========================================================================
-// // 1. API GET DASHBOARD SITE
-// // GET /api/flutter/sites/:siteId/dashboard
-// // =========================================================================
-// router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
-//     try {
-//         const { siteId } = req.params;
-//         const userId = extractUserId(req);
+// =========================================================================
+// 1. API GET DASHBOARD SITE
+// GET /api/flutter/sites/:siteId/dashboard
+// =========================================================================
+router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
+    try {
+        const { siteId } = req.params;
+        const userId = extractUserId(req);
 
-//         const site = await Site.findById(siteId).populate('ownerId', 'username');
-//         if (!site) {
-//             return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
-//         }
+        const site = await Site.findById(siteId).populate('ownerId', 'username');
+        if (!site) {
+            return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+        }
 
-//         // Cek Hak Akses
-//         let allowedGateways = [];
-//         const isOwner = site.ownerId._id.toString() === userId;
-//         const adminRecord = site.admins.find(v => v.userId.toString() === userId);
-//         // Tambahan untuk mendeteksi member
-//         const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
+        // Cek Hak Akses
+        let allowedGateways = [];
+        const isOwner = site.ownerId._id.toString() === userId;
+        const adminRecord = site.admins.find(v => v.userId.toString() === userId);
+        // Tambahan untuk mendeteksi member
+        const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
 
-//         if (isOwner) {
-//             allowedGateways = site.devices; 
-//         } else if (adminRecord) {
-//             allowedGateways = adminRecord.allowedDevices; 
-//         } else if (memberRecord) {
-//             // Member bisa melihat semua perangkat di dalam site
-//             allowedGateways = site.devices; 
-//         } else {
-//             return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini' });
-//         }
+        if (isOwner) {
+            allowedGateways = site.devices; 
+        } else if (adminRecord) {
+            allowedGateways = adminRecord.allowedDevices; 
+        } else if (memberRecord) {
+            // Member bisa melihat semua perangkat di dalam site
+            allowedGateways = site.devices; 
+        } else {
+            return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini' });
+        }
 
-//         // Ambil data sensor terbaru
-//         const devicesWithData = await Promise.all(
-//             allowedGateways.map(async (deviceID) => {
-//                 try {
-//                     const deviceInfo = await Device.findOne({ serialID: deviceID });
-//                     const deviceName = deviceInfo ? deviceInfo.name : `Sensor ${deviceID}`;
+        // Ambil data sensor terbaru
+        const devicesWithData = await Promise.all(
+            allowedGateways.map(async (deviceID) => {
+                try {
+                    const deviceInfo = await Device.findOne({ serialID: deviceID });
+                    const deviceName = deviceInfo ? deviceInfo.name : `Sensor ${deviceID}`;
 
-//                     const SensorModel = getSensorModel(deviceID);
-//                     const latestData = await SensorModel.findOne().sort({ Waktu: -1 }).lean();
+                    const SensorModel = getSensorModel(deviceID);
+                    const latestData = await SensorModel.findOne().sort({ Waktu: -1 }).lean();
 
-//                     // Perhitungan status Online
-//                     let isOnline = false;
-//                     if (latestData?.Waktu) {
-//                         const diffMinutes = (new Date() - new Date(latestData.Waktu)) / (1000 * 60);
-//                         isOnline = diffMinutes < 5;
-//                     }
+                    // Perhitungan status Online
+                    let isOnline = false;
+                    if (latestData?.Waktu) {
+                        const diffMinutes = (new Date() - new Date(latestData.Waktu)) / (1000 * 60);
+                        isOnline = diffMinutes < 5;
+                    }
 
-//                     return {
-//                         id: deviceID,
-//                         name: deviceName,
-//                         temperature: latestData ? latestData.Suhu : null,
-//                         humidity: latestData ? latestData.Kelembapan : null,
-//                         lastUpdate: latestData ? latestData.Waktu : null,
-//                         status: isOnline ? 'online' : 'offline'
-//                     };
-//                 } catch (err) {
-//                     console.error(`❌ Error fetching data for device ${deviceID}:`, err.message);
-//                     return { id: deviceID, name: `Error ${deviceID}`, status: 'error' };
-//                 }
-//             })
-//         );
+                    return {
+                        id: deviceID,
+                        name: deviceName,
+                        temperature: latestData ? latestData.Suhu : null,
+                        humidity: latestData ? latestData.Kelembapan : null,
+                        lastUpdate: latestData ? latestData.Waktu : null,
+                        status: isOnline ? 'online' : 'offline'
+                    };
+                } catch (err) {
+                    console.error(`❌ Error fetching data for device ${deviceID}:`, err.message);
+                    return { id: deviceID, name: `Error ${deviceID}`, status: 'error' };
+                }
+            })
+        );
 
-//         res.json({
-//             success: true,
-//             siteName: site.name,
-//             ownerName: isOwner ? "Anda" : site.ownerId.username,
-//             // Deteksi role apa yang sedang mengakses untuk dikirim ke frontend
-//             role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
-//             data: devicesWithData
-//         });
+        res.json({
+            success: true,
+            siteName: site.name,
+            ownerName: isOwner ? "Anda" : site.ownerId.username,
+            // Deteksi role apa yang sedang mengakses untuk dikirim ke frontend
+            role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
+            data: devicesWithData
+        });
 
-//     } catch (error) {
-//         console.error("❌ Error Dashboard:", error);
-//         res.status(500).json({ success: false, message: 'Server Error', error: error.message });
-//     }
-// });
+    } catch (error) {
+        console.error("❌ Error Dashboard:", error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    }
+});
 
 // =========================================================================
 // 2. API GET DEVICE DETAIL (GRAFIK)
@@ -404,79 +404,79 @@ router.patch('/user/fcm-token', async (req, res) => {
 //
 // Endpoint v1 (/dashboard) TIDAK diubah — Flutter lama tetap berjalan.
 // =========================================================================
-router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
-    try {
-        const { siteId } = req.params;
-        const userId = extractUserId(req);
+// router.get('/sites/:siteId/dashboard/v2', apiLimiter, async (req, res) => {
+//     try {
+//         const { siteId } = req.params;
+//         const userId = extractUserId(req);
 
-        const site = await Site.findOne({ siteId: siteId.toUpperCase() }).populate('ownerId', 'username');
-        if (!site) {
-            return res.status(404).json({ success: false, message: 'Site tidak ditemukan.' });
-        }
+//         const site = await Site.findOne({ siteId: siteId.toUpperCase() }).populate('ownerId', 'username');
+//         if (!site) {
+//             return res.status(404).json({ success: false, message: 'Site tidak ditemukan.' });
+//         }
 
-        // Validasi akses (sama dengan v1)
-        const isOwner    = site.ownerId._id.toString() === userId;
-        const adminRecord  = site.admins.find(a => a.userId.toString() === userId);
-        const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
+//         // Validasi akses (sama dengan v1)
+//         const isOwner    = site.ownerId._id.toString() === userId;
+//         const adminRecord  = site.admins.find(a => a.userId.toString() === userId);
+//         const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
 
-        if (!isOwner && !adminRecord && !memberRecord) {
-            return res.status(403).json({ success: false, message: 'Access for this site is denied.' });
-        }
+//         if (!isOwner && !adminRecord && !memberRecord) {
+//             return res.status(403).json({ success: false, message: 'Access for this site is denied.' });
+//         }
 
-        // Tentukan gateway MAC yang boleh dilihat user ini
-        let allowedDeviceIds = [];
-        if (isOwner || memberRecord) {
-            allowedDeviceIds = site.devices; // semua perangkat
-        } else if (adminRecord) {
-            allowedDeviceIds = adminRecord.allowedDevices;
-        }
+//         // Tentukan gateway MAC yang boleh dilihat user ini
+//         let allowedDeviceIds = [];
+//         if (isOwner || memberRecord) {
+//             allowedDeviceIds = site.devices; // semua perangkat
+//         } else if (adminRecord) {
+//             allowedDeviceIds = adminRecord.allowedDevices;
+//         }
 
-        // Ambil semua Gateway milik site ini yang ada di allowedDeviceIds
-        const gateways = await Gateway.find({
-            mac: { $in: allowedDeviceIds.map(id => id.toUpperCase()) },
-            siteId: siteId
-        }).lean();
+//         // Ambil semua Gateway milik site ini yang ada di allowedDeviceIds
+//         const gateways = await Gateway.find({
+//             mac: { $in: allowedDeviceIds.map(id => id.toUpperCase()) },
+//             siteId: siteId
+//         }).lean();
 
-        // Untuk setiap Gateway, ambil semua Node anaknya
-        const gatewaysWithNodes = await Promise.all(
-            gateways.map(async (gw) => {
-                const nodes = await Node.find({ gatewayId: gw._id }).lean();
+//         // Untuk setiap Gateway, ambil semua Node anaknya
+//         const gatewaysWithNodes = await Promise.all(
+//             gateways.map(async (gw) => {
+//                 const nodes = await Node.find({ gatewayId: gw._id }).lean();
 
-                // Format node — data terakhir sudah di-cache di nodeModel
-                const formattedNodes = nodes.map(node => ({
-                    id: node._id,
-                    serialId: node.serialId,
-                    name: node.name || node.serialId,
-                    status: node.isOnline ? 'online' : 'offline',
-                    temperature: node.lastTemperature,
-                    humidity: node.lastHumidity,
-                    lastUpdate: node.lastSeen
-                }));
+//                 // Format node — data terakhir sudah di-cache di nodeModel
+//                 const formattedNodes = nodes.map(node => ({
+//                     id: node._id,
+//                     serialId: node.serialId,
+//                     name: node.name || node.serialId,
+//                     status: node.isOnline ? 'online' : 'offline',
+//                     temperature: node.lastTemperature,
+//                     humidity: node.lastHumidity,
+//                     lastUpdate: node.lastSeen
+//                 }));
 
-                return {
-                    id: gw._id,
-                    serialId: gw.mac,
-                    name: gw.name || gw.mac,
-                    status: gw.isOnline ? 'online' : 'offline',
-                    currentMode: gw.currentMode,
-                    lastSeen: gw.lastSeen,
-                    nodes: formattedNodes
-                };
-            })
-        );
+//                 return {
+//                     id: gw._id,
+//                     serialId: gw.mac,
+//                     name: gw.name || gw.mac,
+//                     status: gw.isOnline ? 'online' : 'offline',
+//                     currentMode: gw.currentMode,
+//                     lastSeen: gw.lastSeen,
+//                     nodes: formattedNodes
+//                 };
+//             })
+//         );
 
-        res.json({
-            success: true,
-            siteName: site.name,
-            role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
-            data: gatewaysWithNodes
-        });
+//         res.json({
+//             success: true,
+//             siteName: site.name,
+//             role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
+//             data: gatewaysWithNodes
+//         });
 
-    } catch (error) {
-        console.error('❌ Error Dashboard v2:', error);
-        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
-    }
-});
+//     } catch (error) {
+//         console.error('❌ Error Dashboard v2:', error);
+//         res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+//     }
+// });
 
 // =========================================================================
 // 10. 🔥 NEW — KIRIM PERINTAH KE GATEWAY

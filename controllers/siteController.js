@@ -57,6 +57,7 @@ exports.getMySites = async (req, res) => {
             const responseData = {
                 id: site._id,
                 _id: site._id,
+                customSiteId: site.siteId,
                 name: site.name,
                 location: site.location || "Unknown",
                 role: role,

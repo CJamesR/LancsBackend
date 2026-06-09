@@ -20,10 +20,8 @@ router.post('/', protect, async (req, res) => {
         const userId = extractUserId(req);
 
         if (!name) return res.status(400).json({ success: false, message: "Site name must be filled!" });
-        const generatedSiteId = 'SITE-' + Math.random().toString(36).substring(2, 7).toUpperCase();
 
         const newSite = new Site({
-            siteId: generatedSiteId, // <--- Dimasukkan di sini
             name: name, 
             location: location || "Location not specified",
             ownerId: userId, 
@@ -39,7 +37,7 @@ router.post('/', protect, async (req, res) => {
             data: newSite 
         });
     } catch (error) {
-        res.status(500).json({ success: false, error: "Gagal membuat site baru: " + error.message });
+        res.status(500).json({ success: false, error: "Failed to create site:" + error.message });
     }
 });
 
@@ -58,7 +56,7 @@ router.patch('/:siteId', protect, checkSiteRole(['owner']), async (req, res) => 
 
         // Validasi: Cegah update jika tidak ada data yang dikirim
         if (!name && !location) {
-            return res.status(400).json({ success: false, message: 'Tidak ada data yang diubah' });
+            return res.status(400).json({ success: false, message: 'No data have been changed' });
         }
 
         const site = await Site.findByIdAndUpdate(
@@ -67,7 +65,7 @@ router.patch('/:siteId', protect, checkSiteRole(['owner']), async (req, res) => 
             { new: true }
         );
 
-        if (!site) return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+        if (!site) return res.status(404).json({ success: false, message: 'Site not found' });
 
         // 🔥 CATAT AKTIVITAS
         let actionDesc = `Updated site details.`;
@@ -81,7 +79,7 @@ router.patch('/:siteId', protect, checkSiteRole(['owner']), async (req, res) => 
             action: actionDesc
         });
 
-        res.json({ success: true, message: 'Site berhasil diupdate', data: site });
+        res.json({ success: true, message: 'Site successfully updated', data: site });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -95,10 +93,10 @@ router.delete('/:siteId/leave', protect, async (req, res) => {
         const siteId = req.params.siteId;
 
         const site = await Site.findById(siteId);
-        if (!site) return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+        if (!site) return res.status(404).json({ success: false, message: 'Site not found' });
         
         if (site.ownerId.toString() === userId) {
-            return res.status(400).json({ success: false, message: 'Owner tidak bisa leave. Hapus site atau transfer ownership.' });
+            return res.status(400).json({ success: false, message: 'Owner cannot leave the site. Please delete the site or transfer ownership.' });
         }
 
         site.admins = site.admins.filter(a => a.userId.toString() !== userId);
@@ -112,7 +110,7 @@ router.delete('/:siteId/leave', protect, async (req, res) => {
             action: `Left the site`
         });
 
-        res.json({ success: true, message: 'Berhasil keluar dari site.' });
+        res.json({ success: true, message: 'Successfully left the site.' });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -156,7 +154,7 @@ router.delete('/:siteId/devices/:deviceId', protect, checkSiteRole(['owner', 'ad
 
         res.json({ success: true, message: `Alat ${deviceId} berhasil dicabut.`, dataWiped: dataWiped });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
+        res.status(500).json({ success: false, message: 'Server error.' });
     }
 });
 
@@ -168,7 +166,7 @@ router.delete('/:siteId', protect, checkSiteRole(['owner']), async (req, res) =>
         const site = await Site.findById(siteId);
 
         if (site.admins && site.admins.length > 0) {
-            return res.status(400).json({ success: false, code: "HAS_ADMINS", message: "Site masih memiliki Admin. Lepas Admin terlebih dahulu." });
+            return res.status(400).json({ success: false, code: "HAS_ADMINS", message: "Site still has Admins. Please remove Admins first." });
         }
 
         if (site.devices && site.devices.length > 0) {
@@ -186,9 +184,9 @@ router.delete('/:siteId', protect, checkSiteRole(['owner']), async (req, res) =>
         }
 
         await Site.findByIdAndDelete(siteId);
-        res.json({ success: true, message: `Site ${site.name} berhasil dihapus permanen.`, devicesFreed: site.devices.length, wipedCollections });
+        res.json({ success: true, message: `Site ${site.name} successfully deleted permanently.`, devicesFreed: site.devices.length, wipedCollections });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
+        res.status(500).json({ success: false, message: 'Server error.' });
     }
 });
 
@@ -201,7 +199,7 @@ router.patch('/:siteId/devices/:deviceId/rename', protect, checkSiteRole(['owner
 
         const updatedDevice = await Device.findByIdAndUpdate(deviceId, { name: newName }, { new: true });
 
-        if (!updatedDevice) return res.status(404).json({ message: "Perangkat tidak ditemukan" });
+        if (!updatedDevice) return res.status(404).json({ message: "Device not found" });
 
         // 🔥 CATAT AKTIVITAS
         await ActivityLog.create({
@@ -210,10 +208,10 @@ router.patch('/:siteId/devices/:deviceId/rename', protect, checkSiteRole(['owner
             action: `Renamed device to ${newName}`
         });
 
-        res.status(200).json({ message: "Nama perangkat berhasil diubah", data: updatedDevice });
+        res.status(200).json({ message: "Device name successfully updated", data: updatedDevice });
         if (global.io) { global.io.emit('device_renamed', { deviceId: updatedDevice._id, newName: updatedDevice.name }); }
     } catch (error) {
-        res.status(500).json({ error: "Gagal mengubah nama perangkat" });
+        res.status(500).json({ error: "Failed to update device name" });
     }
 });
 
