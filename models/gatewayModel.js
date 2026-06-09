@@ -11,8 +11,6 @@ const mongoose = require('mongoose');
 //   3. Gateway kini terikat ke ownerId dan siap terima data dari node
 // =========================================================================
 const gatewaySchema = new mongoose.Schema({
-
-    // MAC Address hardware — identifier utama, unik per unit fisik
     mac: {
         type: String,
         required: true,

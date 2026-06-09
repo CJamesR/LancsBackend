@@ -409,7 +409,7 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
         const { siteId } = req.params;
         const userId = extractUserId(req);
 
-        const site = await Site.findById(siteId).populate('ownerId', 'username');
+        const site = await Site.findOne({ siteId: siteId.toUpperCase() }).populate('ownerId', 'username');
         if (!site) {
             return res.status(404).json({ success: false, message: 'Site tidak ditemukan.' });
         }
@@ -420,7 +420,7 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
         const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
 
         if (!isOwner && !adminRecord && !memberRecord) {
-            return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini.' });
+            return res.status(403).json({ success: false, message: 'Access for this site is denied.' });
         }
 
         // Tentukan gateway MAC yang boleh dilihat user ini

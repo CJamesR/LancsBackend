@@ -119,37 +119,41 @@ class MQTTHandler {
   // Payload     : { gateway_mac: "GW-001", user_token: "<JWT>" }
   // Hasil       : Gateway UPSERT di database, terikat ke ownerId
   // =========================================================================
-  async handleGatewayRegister(data) {
-    const { gateway_mac, user_token } = data;
-    console.log(`\n📥 [MQTT IN] Registrasi Gateway: ${gateway_mac}`);
+// =========================================================================
+  // PENDAFTARAN GATEWAY VIA MQTT + AUTO ASSIGNMENT
+  // =========================================================================
+async handleGatewayRegister(data) {
+    const { gateway_mac, user_token, siteId } = data;
+    console.log(`\n📥 [MQTT IN] Gateway Register: ${gateway_mac}`);
 
     if (!gateway_mac || !user_token) {
-      console.warn('⚠️ Payload register tidak valid: gateway_mac atau user_token kosong.');
+      console.warn('⚠️ Payload register not valid: gateway_mac or user_token empty.');
       return;
     }
 
-    // Verifikasi JWT — user_token adalah token yang sama dengan yang dipakai Flutter
-    let decodedToken;
     try {
-      decodedToken = jwt.verify(user_token, process.env.JWT_SECRET);
-    } catch (err) {
-      console.error(`❌ Token Gateway [${gateway_mac}] tidak valid:`, err.message);
-      this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
-        status: 'error',
-        message: 'Token tidak valid atau kedaluwarsa. Silakan login ulang di aplikasi.'
-      }));
-      return;
-    }
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(user_token, process.env.JWT_SECRET);
+      const userId = decoded.userId;
 
-    const userId = decodedToken.userId;
+      const Site = require('../models/siteModel');
+      let actualSiteObjectId = null;
 
-    try {
-      // UPSERT — aman diulang setiap Gateway reconnect
+      // Translasi ID Kustom ke ObjectId MongoDB
+      if (siteId) {
+          const site = await Site.findOne({ siteId: siteId.toUpperCase() });
+          if (site) {
+              actualSiteObjectId = site._id;
+              await Site.findByIdAndUpdate(site._id, { $addToSet: { devices: gateway_mac.toUpperCase() } });
+          }
+      }
+
       const gateway = await Gateway.findOneAndUpdate(
         { mac: gateway_mac.toUpperCase() },
         {
           $set: {
             ownerId: userId,
+            siteId: actualSiteObjectId,
             isOnline: true,
             lastSeen: new Date(),
             currentMode: 2
@@ -166,15 +170,14 @@ class MQTTHandler {
         gatewayId: gateway._id.toString()
       }));
 
-    } catch (dbErr) {
-      console.error(`❌ Gagal simpan Gateway [${gateway_mac}]:`, dbErr.message);
+    } catch (err) {
+      console.error(`❌ Gagal registrasi Gateway [${gateway_mac}]:`, err.message);
       this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
         status: 'error',
-        message: 'Kesalahan server saat menyimpan data gateway.'
+        message: 'Registrasi gagal. Pastikan token valid atau tidak kedaluwarsa.'
       }));
     }
   }
-
   // =========================================================================
   // FASE 2 TUGAS 2 & 3 — PROSES DATA SENSOR
   // Topik masuk : LancsSK/sensor/data

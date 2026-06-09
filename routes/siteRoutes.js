@@ -19,17 +19,27 @@ router.post('/', protect, async (req, res) => {
         const { name, location } = req.body;
         const userId = extractUserId(req);
 
-        if (!name) return res.status(400).json({ success: false, message: "Nama Site wajib diisi!" });
+        if (!name) return res.status(400).json({ success: false, message: "Site name must be filled!" });
+        const generatedSiteId = 'SITE-' + Math.random().toString(36).substring(2, 7).toUpperCase();
 
         const newSite = new Site({
-            name: name, location: location || "Lokasi tidak ditentukan",
-            ownerId: userId, admins: [], members: [], devices: []
+            siteId: generatedSiteId, // <--- Dimasukkan di sini
+            name: name, 
+            location: location || "Location not specified",
+            ownerId: userId, 
+            admins: [], 
+            members: [], 
+            devices: []
         });
 
         await newSite.save();
-        res.status(201).json({ success: true, message: `Site '${name}' berhasil dibuat!`, data: newSite });
+        res.status(201).json({ 
+            success: true, 
+            message: `Site '${name}' created successfully!`, 
+            data: newSite 
+        });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: "Gagal membuat site baru: " + error.message });
     }
 });
 
