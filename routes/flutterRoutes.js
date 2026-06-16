@@ -573,29 +573,31 @@ router.get('/gateway/:mac/nodes', async (req, res) => {
         const { mac } = req.params;
         const userId  = extractUserId(req);
 
-        // Validasi kepemilikan Gateway
         const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
-        if (!gateway) {
-            return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan.' });
-        }
-        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Anda bukan pemilik Gateway ini.' });
-        }
+        if (!gateway) return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan.' });
+        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) return res.status(403).json({ success: false, message: 'Anda bukan pemilik Gateway ini.' });
 
-        // Ambil semua Node yang terikat ke Gateway ini
         const nodes = await Node.find({ gatewayId: gateway._id }).lean();
+        
+        // Tangkap waktu aktual saat ini
+        const now = new Date(); 
 
-        const formattedNodes = nodes.map(node => ({
-            id: node._id,
-            serialId: node.serialId,
-            name: node.name || node.serialId,
-            status: node.isOnline ? 'online' : 'offline',
-            temperature: node.lastTemperature,
-            humidity: node.lastHumidity,
-            lastUpdate: node.lastSeen,
-            minTemp: node.minTemp,
-            maxTemp: node.maxTemp
-        }));
+        const formattedNodes = nodes.map(node => {
+            // EKSEKUSI AMBANG BATAS: 10 Menit (10 * 60 * 1000 = 600.000 milidetik)
+            const isNodeOnline = node.lastSeen && (now - new Date(node.lastSeen)) <= 600000;
+
+            return {
+                id: node._id,
+                serialId: node.serialId,
+                name: node.name || node.serialId,
+                status: isNodeOnline ? 'online' : 'offline', // <-- Single Source of Truth
+                temperature: node.lastTemperature,
+                humidity: node.lastHumidity,
+                lastUpdate: node.lastSeen,
+                minTemp: node.minTemp,
+                maxTemp: node.maxTemp
+            };
+        });
 
         res.json({
             success: true,
