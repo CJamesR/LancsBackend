@@ -111,6 +111,92 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
     }
 });
 
+// // =========================================================================
+// // 1. API GET DASHBOARD SITE (TERINTEGRASI LOGIKA V2 & KOMPUTASI WAKTU)
+// // GET /api/flutter/sites/:siteId/dashboard
+// // =========================================================================
+// router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
+//     try {
+//         const { siteId } = req.params;
+//         const userId = extractUserId(req);
+
+//         // Menggunakan ObjectId bawaan sesuai keputusan penghapusan custom string
+//         const site = await Site.findById(siteId).populate('ownerId', 'username');
+//         if (!site) {
+//             return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+//         }
+
+//         // Cek Hak Akses
+//         let allowedDeviceIds = [];
+//         const isOwner = site.ownerId._id.toString() === userId;
+//         const adminRecord = site.admins.find(v => v.userId.toString() === userId);
+//         const memberRecord = site.members && site.members.find(m => m.userId.toString() === userId);
+
+//         if (isOwner || memberRecord) {
+//             allowedDeviceIds = site.devices; 
+//         } else if (adminRecord) {
+//             allowedDeviceIds = adminRecord.allowedDevices; 
+//         } else {
+//             return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini' });
+//         }
+
+//         // Ambil Gateway berdasarkan Hak Akses
+//         const gateways = await Gateway.find({
+//             mac: { $in: allowedDeviceIds.map(id => id.toUpperCase()) },
+//             siteId: site._id 
+//         }).lean();
+
+//         const now = new Date(); // Waktu saat Flutter melakukan request
+
+//         // Rangkai data struktur bersarang: Gateway -> Nodes
+//         const devicesWithData = await Promise.all(
+//             gateways.map(async (gw) => {
+//                 // KOMPUTASI GATEWAY: Toleransi 5 Menit (300.000 ms)
+//                 const isGwOnline = gw.lastSeen && (now - new Date(gw.lastSeen)) <= 300000;
+
+//                 // Cari Node Anak yang terikat ke Gateway ini
+//                 const nodes = await Node.find({ gatewayId: gw._id }).lean();
+                
+//                 const formattedNodes = nodes.map(node => {
+//                     // KOMPUTASI NODE: Toleransi 10 Menit (600.000 ms)
+//                     const isNodeOnline = node.lastSeen && (now - new Date(node.lastSeen)) <= 600000;
+
+//                     return {
+//                         id: node._id,
+//                         serialId: node.serialId,
+//                         name: node.name || node.serialId,
+//                         status: isNodeOnline ? 'online' : 'offline', // Hasil kalkulasi server
+//                         temperature: node.lastTemperature,
+//                         humidity: node.lastHumidity,
+//                         lastUpdate: node.lastSeen
+//                     };
+//                 });
+
+//                 return {
+//                     id: gw._id,
+//                     serialId: gw.mac,
+//                     name: gw.name || gw.mac,
+//                     status: isGwOnline ? 'online' : 'offline', // Hasil kalkulasi server
+//                     currentMode: gw.currentMode,
+//                     lastSeen: gw.lastSeen,
+//                     nodes: formattedNodes // Masukkan array Node ke dalam Gateway
+//                 };
+//             })
+//         );
+
+//         res.json({
+//             success: true,
+//             siteName: site.name,
+//             ownerName: isOwner ? "Anda" : site.ownerId.username,
+//             role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
+//             data: devicesWithData
+//         });
+
+//     } catch (error) {
+//         console.error("❌ Error Dashboard:", error);
+//         res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+//     }
+// });
 // =========================================================================
 // 2. API GET DEVICE DETAIL (GRAFIK)
 // GET /api/flutter/device/:deviceId/detail
@@ -180,6 +266,69 @@ router.get('/device/:deviceId/detail', async (req, res) => {
     }
 });
 
+// router.get('/node/:serialId/detail', protect, async (req, res) => {
+//     try {
+//         const { serialId } = req.params;
+//         const userId = extractUserId(req);
+
+//         const node = await Node.findOne({ serialId: serialId.toUpperCase() }).populate('gatewayId');
+//         if (!node) {
+//             return res.status(404).json({ success: false, message: 'Node tidak ditemukan.' });
+//         }
+
+//         const gateway = node.gatewayId;
+//         if (!gateway) {
+//             return res.status(400).json({ success: false, message: 'Inkonsistensi Data: Node belum terikat ke Gateway manapun.' });
+//         }
+
+//         if (gateway.ownerId.toString() !== userId) {
+//             return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda tidak memiliki akses ke Node ini.' });
+//         }
+
+//         const SensorModel = getSensorModel(gateway.mac);
+//         const timeAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+//         const historyData = await SensorModel.find({
+//             ServerID: gateway.mac,       
+//             RealID: node.serialId,       
+//             Waktu: { $gte: timeAgo }
+//         })
+//         .sort({ Waktu: 1 }) 
+//         .select('Suhu Kelembapan Waktu gps_lat gps_lon -_id')
+//         .lean();
+
+//         const history24h = historyData.map(doc => ({
+//             temperature: doc.Suhu,
+//             humidity: doc.Kelembapan,
+//             timestamp: doc.Waktu,
+//             latitude: doc.gps_lat,
+//             longitude: doc.gps_lon
+//         }));
+
+//         // KOMPUTASI NODE: Toleransi 10 Menit
+//         const now = new Date();
+//         const isNodeOnline = node.lastSeen && (now - new Date(node.lastSeen)) <= 600000;
+
+//         res.json({
+//             success: true,
+//             data: {
+//                 nodeId: node._id,
+//                 serialId: node.serialId,
+//                 name: node.name || node.serialId,
+//                 gatewayMac: gateway.mac,
+//                 status: isNodeOnline ? 'online' : 'offline', // <-- Hasil komputasi
+//                 currentTemperature: node.lastTemperature,
+//                 currentHumidity: node.lastHumidity,
+//                 lastSeen: node.lastSeen,
+//                 history24h: history24h
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error('❌ Error Get Node Detail:', error);
+//         res.status(500).json({ success: false, message: 'Terjadi kesalahan internal server saat memuat riwayat data.' });
+//     }
+// });
 // =========================================================================
 // 3. API INVITE MEMBER
 // POST /api/flutter/sites/:siteId/invite
