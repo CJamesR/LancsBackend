@@ -1054,4 +1054,39 @@ router.post('/gateway/:mac/command', protect, apiLimiter, async (req, res) => {
     }
 });
 
+// =========================================================================
+// LEAVE SITE (Member/Admin keluar sendiri)
+// DELETE /api/flutter/sites/:siteId/leave
+// =========================================================================
+router.delete('/sites/:siteId/leave', protect, async (req, res) => {
+    try {
+        const userId = extractUserId(req);
+        const siteId = req.params.siteId;
+
+        const site = await Site.findById(siteId);
+        if (!site) return res.status(404).json({ success: false, message: 'Site not found' });
+        
+        // Owner tidak boleh keluar, harus hapus site atau transfer kepemilikan
+        if (site.ownerId.toString() === userId) {
+            return res.status(400).json({ success: false, message: 'Owner cannot leave the site. Please delete the site or transfer ownership.' });
+        }
+
+        // Hapus user dari daftar admin maupun member
+        site.admins = site.admins.filter(a => a.userId.toString() !== userId);
+        site.members = (site.members || []).filter(m => m.userId.toString() !== userId);
+        await site.save();
+
+        // 📝 Catat aktivitas
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: `Left the site`
+        });
+
+        res.json({ success: true, message: 'Successfully left the site.' });
+    } catch (error) {
+        console.error("❌ Error Leave Site:", error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
 module.exports = router;

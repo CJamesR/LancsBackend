@@ -193,7 +193,7 @@ async handleGatewayRegister(data) {
 
       if (Checksum) {
         const expected = this.calculateChecksum(
-          ServerID, Suhu, Kelembapan, waktuUntukDB.toISOString()
+          ServerID, Suhu, Kelembapan, Waktu
         );
         if (Checksum.toLowerCase() !== expected.toLowerCase()) {
           console.error(`🚨 [Checksum GAGAL] ${ServerID} | diterima: ${Checksum} | diharapkan: ${expected}`);

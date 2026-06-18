@@ -1,4 +1,7 @@
 const User = require('../models/userModel');
+const Invite = require('../models/inviteModel'); 
+const Site = require('../models/siteModel');
+const ActivityLog = require('../models/activityLogModel');
 
 // @desc    Get all users (admin only)
 // @route   GET /api/users
@@ -140,20 +143,73 @@ exports.changePassword = async (req, res) => {
   }
 };
 
-// @desc    Register new gateway/device
-// @route   POST /api/users/devices
+// @desc    Melihat daftar undangan masuk (Pending Invites)
+// @route   GET /api/user/invites
 // @access  Private
-exports.registerDevice = async (req, res) => {
-  res.status(410).json({
-    success: false,
-    message: 'Endpoint ini sudah tidak digunakan. Silakan gunakan fitur Claim NFC di dalam Site.'
-  });
+exports.getPendingInvites = async (req, res) => {
+    try {
+        const userId = req.user.userId || req.user._id;
+        const user = await User.findById(userId);
+        
+        if (!user) return res.status(404).json({ success: false, message: "User tidak ditemukan" });
+
+        const invites = await Invite.find({ recipientEmail: user.email.toLowerCase(), status: 'pending' });
+        
+        res.json({ success: true, count: invites.length, data: invites });
+    } catch (error) {
+        console.error("Error Get Invites:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 };
 
-// @desc    [DEPRECATED] Get user's devices
-exports.getUserDevices = async (req, res) => {
-  res.status(410).json({
-    success: false,
-    message: 'Endpoint ini sudah tidak digunakan. Silakan gunakan /api/flutter/sites/:siteId/dashboard.'
-  });
+// @desc    Merespons undangan (Accept / Reject)
+// @route   POST /api/user/invites/respond
+// @access  Private
+exports.respondToInvite = async (req, res) => {
+    try {
+        const { inviteId, action } = req.body; // action wajib berisi 'accept' atau 'reject'
+        const userId = req.user.userId || req.user._id;
+
+        if (!action || !['accept', 'reject'].includes(action.toLowerCase())) {
+            return res.status(400).json({ success: false, message: "Action must be 'accept' or 'reject'" });
+        }
+
+        const invite = await Invite.findById(inviteId);
+        if (!invite) return res.status(404).json({ success: false, message: 'Undangan tidak ditemukan' });
+
+        if (action.toLowerCase() === 'accept') {
+            const site = await Site.findById(invite.siteId);
+            if (site) {
+                // Validasi agar tidak terjadi duplikasi jika user sudah pernah masuk
+                const isOwner = site.ownerId.toString() === userId.toString();
+                const isAdmin = site.admins.some(a => a.userId.toString() === userId.toString());
+                const isMember = site.members && site.members.some(m => m.userId.toString() === userId.toString());
+
+                if (!isOwner && !isAdmin && !isMember) {
+                    if (invite.role === 'admin') {
+                        site.admins.push({ userId: userId, allowedDevices: [] });
+                    } else {
+                        if (!site.members) site.members = [];
+                        site.members.push({ userId: userId, role: invite.role });
+                    }
+                    await site.save();
+
+                    // Catat aktivitas bergabung
+                    await ActivityLog.create({
+                        userId: userId,
+                        siteId: site._id,
+                        action: `Joined the site as ${invite.role}`
+                    });
+                }
+            }
+        }
+
+        // Hapus undangan setelah direspons (diterima maupun ditolak)
+        await Invite.findByIdAndDelete(inviteId);
+        res.json({ success: true, message: `Undangan berhasil di-${action}` });
+
+    } catch (error) {
+        console.error("Error Respond Invite:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 };

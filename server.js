@@ -88,7 +88,7 @@ const limiter = rateLimit({
 });
 // app.use("/api", limiter)
 
-app.use("/api/users", userRoutes);
+app.use("/api/user", userRoutes);
 // app.use('/api/sensors', sensorRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use('/api/database', databaseRoutes);

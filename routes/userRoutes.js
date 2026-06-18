@@ -33,5 +33,7 @@ router.get('/profile', userController.getProfile);  // ✅ GET profile
 router.put('/profile', userController.updateProfile); // ✅ UPDATE profile
 router.put('/change-password', userController.changePassword);
 router.get('/all', restrictTo('admin'), userController.getAllUsers);
+router.get('/invites', userController.getPendingInvites);
+router.post('/invites/respond', userController.respondToInvite);
 
 module.exports = router;
