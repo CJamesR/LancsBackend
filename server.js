@@ -87,7 +87,7 @@ const limiter = rateLimit({
   }
 });
 // app.use("/api", limiter)
-
+app.use(morgan('dev'))
 app.use("/api/user", userRoutes);
 // app.use('/api/sensors', sensorRoutes);
 app.use("/api/devices", deviceRoutes);
@@ -98,7 +98,7 @@ app.use('/api/sites', protect, siteRoutes);
 app.use("/api/flutter", protect, flutterRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-app.use(morgan('dev'))
+
 // ==================== MIDDLEWARE ====================
 
 // Logging middleware

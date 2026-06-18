@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const Device = require('../models/device'); 
+const Gateway = require('../models/gatewayModel');
 const Site = require('../models/siteModel'); 
-const ActivityLog = require('../models/activityLogModel'); // 🔥 TAMBAHAN
+const ActivityLog = require('../models/activityLogModel'); 
 const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 
 // =========================================================================
@@ -23,7 +24,7 @@ router.get('/sim/available', protect, async (req, res) => {
                 success: true,
                 message: 'No Device is currently active and available for claiming.',
                 data: []
-            })
+            });
         }
         
         res.json({
@@ -37,37 +38,61 @@ router.get('/sim/available', protect, async (req, res) => {
 });
 
 // =========================================================================
-// 2. API SIMULASI: KLAIM ALAT KE DALAM SITE
+// 2. KLAIM ALAT DARI NFC (DUKUNGAN DEVICE LAMA & GATEWAY BARU)
 // =========================================================================
-router.post('/sim/claim', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
+router.post('/claim', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
-        let { serialID, siteId, deviceName, newPassword } = req.body || {};
+        const { serialID, siteId, deviceName, newPassword } = req.body;
 
-        if (serialID && serialID.includes('-')) {
-            serialID = serialID.replace(/-/g, '_'); 
-        }
-        
         if (!serialID || !siteId) {
-            return res.status(400).json({ success: false, message: "Gagal: Data serialID dan siteId wajib dikirim!" });
+            return res.status(400).json({ success: false, message: "Serial ID dan Site ID wajib diisi." });
         }
 
         const site = await Site.findById(siteId);
+        if (!site) return res.status(404).json({ success: false, message: "Site tidak ditemukan." });
+
+        const userId = req.user?.userId || req.user?._id;
+        let isLegacyDevice = false;
+
+        // A. Coba cari di model Device lama terlebih dahulu
+        let device = await Device.findOne({ serialID: serialID });
         
-        const device = await Device.findOne({ serialID: serialID });
-        if (!device) {
-            return res.status(404).json({ success: false, message: "Gagal: Alat tidak ditemukan di database." });
-        }
-        if (device.isClaimed) {
-            return res.status(400).json({ success: false, message: "Alat ini sudah diklaim oleh Site lain." });
+        if (device) {
+            if (device.isClaimed) {
+                return res.status(400).json({ success: false, message: "Alat ini sudah diklaim oleh Site lain." });
+            }
+            device.isClaimed = true;
+            device.siteId = siteId;
+            device.name = deviceName || device.serialID; 
+            device.devicePassword = newPassword; 
+            await device.save();
+            isLegacyDevice = true;
+        } else {
+            // B. Jika tidak ada di Device lama, daftarkan sebagai Gateway Baru
+            let gateway = await Gateway.findOne({ mac: serialID });
+            
+            if (gateway && gateway.siteId) {
+                return res.status(400).json({ success: false, message: "Gateway ini sudah diklaim oleh Site lain." });
+            }
+
+            if (!gateway) {
+                // Buat dokumen Gateway baru langsung saat diklaim
+                gateway = new Gateway({
+                    mac: serialID.toUpperCase(),
+                    ownerId: userId,
+                    siteId: siteId,
+                    name: deviceName || serialID,
+                    isOnline: false
+                });
+            } else {
+                gateway.ownerId = userId;
+                gateway.siteId = siteId;
+                gateway.name = deviceName || gateway.name;
+            }
+            await gateway.save();
         }
 
-        // Eksekusi Klaim
-        device.isClaimed = true;
-        device.siteId = siteId;
-        device.name = deviceName || device.serialID; 
-        device.devicePassword = newPassword; 
-        await device.save();
-
+        // Sinkronisasi data ke dalam Site
         if (!site.devices.includes(serialID)) {
             site.devices.push(serialID);
         }
@@ -80,18 +105,69 @@ router.post('/sim/claim', protect, checkSiteRole(['owner', 'admin']), async (req
         
         await site.save();
 
-        // 🔥 CATAT AKTIVITAS
+        // Catat aktivitas klaim di sistem
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: `Added ${isLegacyDevice ? 'device' : 'gateway'} ${deviceName || serialID}`
+        });
+
+        res.json({ success: true, message: `Berhasil! Alat ${deviceName || serialID} telah ditambahkan ke Site ${site.name}.` });
+
+    } catch (error) {
+        console.error("❌ Error Klaim NFC:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// =========================================================================
+// 3. HAPUS ALAT (REMOVE DEVICE)
+// =========================================================================
+router.delete('/:siteId/devices/:serialID', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
+    try {
+        const { siteId, serialID } = req.params;
+
+        const site = await Site.findById(siteId);
+        if (!site) return res.status(404).json({ success: false, message: "Site tidak ditemukan." });
+
+        if (!site.devices.includes(serialID)) {
+            return res.status(404).json({ success: false, message: "Alat tidak terdaftar di Site ini." });
+        }
+
+        // Hapus dari Site
+        site.devices = site.devices.filter(id => id !== serialID);
+        site.admins.forEach(admin => {
+            admin.allowedDevices = admin.allowedDevices.filter(id => id !== serialID);
+        });
+        await site.save();
+
+        // Kembalikan status di database
+        let device = await Device.findOne({ serialID: serialID });
+        if (device) {
+            device.isClaimed = false;
+            device.siteId = null;
+            await device.save();
+        } else {
+            // Hapus asosiasi dari Gateway jika itu adalah Gateway baru
+            let gateway = await Gateway.findOne({ mac: serialID });
+            if (gateway) {
+                gateway.siteId = null;
+                gateway.ownerId = null; // Lepaskan kepemilikan
+                await gateway.save();
+            }
+        }
+
         const userId = req.user?.userId || req.user?._id;
         await ActivityLog.create({
             userId: userId,
             siteId: siteId,
-            action: `Added node ${device.name}`
+            action: `Removed device ${serialID}`
         });
 
-        res.json({ success: true, message: `Berhasil! Alat ${device.name} telah ditambahkan ke Site ${site.name}.` });
+        res.json({ success: true, message: "Alat berhasil dilepaskan dari Site." });
 
     } catch (error) {
-        console.error("❌ Error Claim NFC:", error);
+        console.error("❌ Error Remove Device:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
