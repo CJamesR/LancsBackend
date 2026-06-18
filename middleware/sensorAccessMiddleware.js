@@ -3,7 +3,7 @@ const Device = require('../models/device');
 
 const checkSensorAccess = async (req, res, next) => {
   try {
-    const sensorId = req.params.sensorId || req.body.ServerID;
+    const sensorId = req.params.sensorId || req.body.gateID;
     const user = req.user;
     
     if (!user) {

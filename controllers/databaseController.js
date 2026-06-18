@@ -58,7 +58,7 @@ exports.scanDatabase = async (req, res) => {
               temperature: latestDoc.Suhu,
               humidity: latestDoc.Kelembapan,
               timestamp: latestDoc.Waktu,
-              serverId: latestDoc.ServerID
+              gateID: latestDoc.gateID
             } : null,
             timeRange: latestDoc && oldestDoc ? {
               from: oldestDoc.Waktu,
@@ -285,7 +285,7 @@ exports.getAllSensors = async (req, res) => {
               temperature: latest.Suhu,
               humidity: latest.Kelembapan,
               timestamp: latest.Waktu,
-              serverId: latest.ServerID
+              gateID: latest.gateID
             },
             history24h: recentData.map(doc => ({
               temperature: doc.Suhu,

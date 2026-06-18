@@ -289,8 +289,8 @@ router.get('/device/:deviceId/detail', async (req, res) => {
 //         const timeAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
 //         const historyData = await SensorModel.find({
-//             ServerID: gateway.mac,       
-//             RealID: node.serialId,       
+//             gateID: gateway.mac,       
+//             nodeID: node.serialId,       
 //             Waktu: { $gte: timeAgo }
 //         })
 //         .sort({ Waktu: 1 }) 
@@ -869,13 +869,13 @@ router.get('/node/:serialId/detail', protect, async (req, res) => {
         }
 
         // 3. Ambil data historis 24 jam terakhir dari koleksi dinamis Mongoose
-        // Ingat: Tabel dibentuk berdasarkan MAC Induk (Gateway), datanya difilter berdasarkan RealID (Node)
+        // Ingat: Tabel dibentuk berdasarkan MAC Induk (Gateway), datanya difilter berdasarkan nodeID (Node)
         const SensorModel = getSensorModel(gateway.mac);
         const timeAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
         const historyData = await SensorModel.find({
-            ServerID: gateway.mac,       // Induk
-            RealID: node.serialId,       // Anak spesifik
+            gateID: gateway.mac,       // Induk
+            nodeID: node.serialId,       // Anak spesifik
             Waktu: { $gte: timeAgo }
         })
         .sort({ Waktu: 1 }) // Urutkan dari yang paling lama ke terbaru untuk chart
@@ -1004,53 +1004,43 @@ router.get('/gateways', protect, async (req, res) => {
     }
 });
 
-router.post('/gateway/:mac/command', protect, apiLimiter, async (req, res) => {
+// =========================================================================
+// KONTROL GATEWAY (KIRIM PERINTAH VIA MQTT)
+// POST /api/flutter/sites/:siteId/gateways/:mac/command
+// =========================================================================
+router.post('/sites/:siteId/gateways/:mac/command', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
-        // 1. Ekstraksi parameter dari URL dan Body
-        const { mac } = req.params;
-        const { cmd, ...extraPayload } = req.body; 
-        const userId = extractUserId(req);
+        const { siteId, mac } = req.params;
+        const { command } = req.body; 
 
-        // Validasi input
-        if (!cmd) {
-            return res.status(400).json({ success: false, message: 'Parameter "cmd" wajib disertakan di dalam body request.' });
+        if (!command) {
+            return res.status(400).json({ success: false, message: "Perintah (command) wajib diisi." });
         }
 
-        // 2. Keamanan & Validasi Relasi di MongoDB
-        const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
-        
+        // Pastikan gateway valid sebelum mengirim perintah
+        const gateway = await Gateway.findOne({ mac: mac.toUpperCase(), siteId: siteId });
         if (!gateway) {
-            return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan di pangkalan data.' });
+            return res.status(404).json({ success: false, message: "Gateway tidak ditemukan di Site ini." });
         }
 
-        // Otorisasi Absolut: Hanya pemilik yang bisa mengirim perintah ke alat ini
-        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'Akses Ditolak: Anda tidak memiliki otoritas atas Gateway ini.' 
-            });
-        }
+        // Tembakkan perintah MQTT
+        mqttHandler.sendGatewayCommand(mac.toUpperCase(), command);
+        
+        const userId = extractUserId(req);
+        await ActivityLog.create({
+            userId: userId,
+            siteId: siteId,
+            action: `Sent command '${command}' to gateway ${mac}`
+        });
 
-        // 3. Eksekusi: Meneruskan perintah ke MQTT Handler yang sudah direvisi
-        // Parameter extraPayload memungkinkan pengiriman data tambahan (seperti SSID/Password) jika diperlukan nantinya
-        const isDispatched = mqttHandler.sendGatewayCommand(gateway.mac, cmd, extraPayload);
-
-        // 4. Respons balikan ke klien Flutter
-        if (isDispatched) {
-            return res.status(200).json({ 
-                success: true, 
-                message: `Perintah '${cmd}' telah berhasil diinstruksikan ke Gateway.` 
-            });
-        } else {
-            return res.status(503).json({ 
-                success: false, 
-                message: 'Gagal mengirim instruksi: Peladen saat ini terputus dari jaringan MQTT.' 
-            });
-        }
+        res.status(200).json({ 
+            success: true, 
+            message: `Perintah '${command}' berhasil dikirim ke Gateway.` 
+        });
 
     } catch (error) {
-        console.error(`❌ Error Gateway Command API [${req.params.mac}]:`, error.message);
-        res.status(500).json({ success: false, message: 'Kesalahan internal server saat memproses perintah.' });
+        console.error("❌ Error Control Gateway:", error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 

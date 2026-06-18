@@ -1,6 +1,7 @@
 // middleware/checksumValidator.js
+// middleware/checksumValidator.js
 module.exports = (req, res, next) => {
-  const { ServerID, Suhu, Kelembapan, Waktu, Checksum } = req.body;
+  const { gateID, Suhu, Kelembapan, Waktu, Checksum } = req.body;
   
   // Validate checksum exists
   if (!Checksum) {
@@ -9,23 +10,22 @@ module.exports = (req, res, next) => {
       message: "Data integrity check failed"
     });
   }
-  // Di dalam checksumValidator.js
+  
   const calculateChecksum = (id, suhu, kelembapan, waktu) => {
-  // Gunakan .toFixed(2) agar sama dengan String(val, 2) di Arduino
     const data = id + Number(suhu).toFixed(2) + Number(kelembapan).toFixed(2) + waktu;
     let hash = 0;
     for (let i = 0; i < data.length; i++) {
       hash = (hash * 31 + data.charCodeAt(i)) % 65536;
-  }
-    return hash.toString(16).padStart(4, '0'); // Pastikan selalu 4 digit hex
+    }
+    return hash.toString(16).padStart(4, '0'); 
   };
   
-  const expectedChecksum = calculateChecksum(ServerID, Suhu, Kelembapan, Waktu);
+  const expectedChecksum = calculateChecksum(gateID, Suhu, Kelembapan, Waktu);
   
   // Compare checksums
   if (Checksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
     console.error('🚨 Checksum mismatch detected!');
-    console.error('  Device:', ServerID);
+    console.error('  Device:', gateID);
     console.error('  Received checksum:', Checksum);
     console.error('  Expected checksum:', expectedChecksum);
     console.error('  Data:', { Suhu, Kelembapan, Waktu });
@@ -38,9 +38,11 @@ module.exports = (req, res, next) => {
     });
   }
   
-  console.log(`✅ Checksum valid for ${ServerID}`);
+  console.log(`✅ Checksum valid for ${gateID}`);
   next();
 };
+
+
 
 // // Tunggu Kepastian dari Frits
 // // middleware/checksumValidator.js

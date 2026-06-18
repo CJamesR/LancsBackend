@@ -10,8 +10,8 @@ const getSensorModel = (sensorID) => {
   }
 
   const sensorSchema = new mongoose.Schema({
-    ServerID: { type: String, default: "-" },
-    RealID: { type: String, required: true },
+    gateID: { type: String, default: "-" },
+    nodeID: { type: String, required: true },
     Suhu: { type: Number, required: true },
     Kelembapan: { type: Number, required: true },
     gps_lat: { type: Number, default: null },

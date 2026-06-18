@@ -14,15 +14,15 @@ function getWIBTime() {
 // ESP8266: Add sensor data via HTTP POST (API Key)
 exports.addSensorData = async (req, res) => {
   try {
-    let { ServerID, Suhu, Kelembapan, Checksum, RealID, DeviceTime } = req.body;
+    let { gateID, nodeID, Suhu, Kelembapan, Checksum, DeviceTime } = req.body;
 
-    console.log('📥 ESP8266 Data received:', { ServerID, Suhu, Kelembapan, DeviceTime });
+    console.log('📥 ESP8266 Data received:', { gateID, Suhu, Kelembapan, DeviceTime });
 
     // Validasi
-    if (!ServerID || typeof ServerID !== 'string') {
+    if (!gateID || typeof gateID !== 'string') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid ServerID'
+        message: 'Invalid gateID'
       });
     }
 
@@ -32,12 +32,12 @@ exports.addSensorData = async (req, res) => {
     if (isNaN(Suhu) || isNaN(Kelembapan)) {
       return res.status(400).json({
         success: false,
-        message: 'Suhu dan Kelembapan harus angka'
+        message: 'Suhu and Kelembapan must be a number'
       });
     }
 
     // Get sensor model
-    const SensorModel = getSensorModel(ServerID);
+    const SensorModel = getSensorModel(gateID);
 
     const serverTime = getWIBTime();
     let recordTime = serverTime; // Default pakai waktu server
@@ -52,12 +52,12 @@ exports.addSensorData = async (req, res) => {
     }
 
     const sensorData = {
-      ServerID,
+      gateId: gateID,
+      nodeID: nodeID,
       Suhu,
       Kelembapan,
       Waktu: recordTime, 
       source: 'http',
-      RealID: RealID || "-" 
     };
 
     if (Checksum) {

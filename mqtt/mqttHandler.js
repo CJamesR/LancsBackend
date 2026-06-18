@@ -168,13 +168,13 @@ async handleGatewayRegister(data) {
       console.log('\n📥 [MQTT IN] Data sensor:');
       console.log(JSON.stringify(data, null, 2));
 
-      const { ServerID, RealID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon } = data;
-      if (!ServerID || Suhu === undefined || Kelembapan === undefined) {
-        console.error('❌ Data tidak lengkap: ServerID, Suhu, atau Kelembapan kosong.');
+      const { gateID, nodeID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon } = data;
+      if (!gateID || Suhu === undefined || Kelembapan === undefined) {
+        console.error('❌ Data tidak lengkap: gateID, Suhu, atau Kelembapan kosong.');
         return;
       }
       if (parseFloat(Suhu) === -888 || parseFloat(Kelembapan) === -888) {
-        console.warn(`⚠️ [Filter] Sinyal inisialisasi (-888) dari ${ServerID} diabaikan.`);
+        console.warn(`⚠️ [Filter] Sinyal inisialisasi (-888) dari ${gateID} diabaikan.`);
         return;
       }
       let waktuUntukDB = new Date();
@@ -193,26 +193,26 @@ async handleGatewayRegister(data) {
 
       if (Checksum) {
         const expected = this.calculateChecksum(
-          ServerID, Suhu, Kelembapan, Waktu
+          gateID, Suhu, Kelembapan, Waktu
         );
         if (Checksum.toLowerCase() !== expected.toLowerCase()) {
-          console.error(`🚨 [Checksum GAGAL] ${ServerID} | diterima: ${Checksum} | diharapkan: ${expected}`);
-          this.publish(`LancsSK/ack/${ServerID}`, JSON.stringify({
+          console.error(`🚨 [Checksum GAGAL] ${gateID} | diterima: ${Checksum} | diharapkan: ${expected}`);
+          this.publish(`LancsSK/ack/${gateID}`, JSON.stringify({
             status: 'error',
             message: 'Checksum tidak cocok. Data ditolak.'
           }));
           return;
         }
-        console.log(`✅ [Checksum OK] ${ServerID}`);
+        console.log(`✅ [Checksum OK] ${gateID}`);
       } else {
-        console.warn(`⚠️ Tidak ada checksum dari ${ServerID}, data tetap diproses.`);
+        console.warn(`⚠️ Tidak ada checksum dari ${gateID}, data tetap diproses.`);
       }
 
       // ── Emit real-time ke Flutter via Socket.IO ─────────────────────────
       if (global.io) {
         const socketPayload = {
-          id: ServerID,
-          realId: RealID || null,
+          id: gateID,
+          nodeID: nodeID || null,
           temperature: Suhu,
           humidity: Kelembapan,
           latitude: gps_lat || null,
@@ -220,18 +220,18 @@ async handleGatewayRegister(data) {
           lastUpdated: waktuUntukDB.toISOString()
         };
         console.log('📤 [SOCKET OUT]', JSON.stringify(socketPayload));
-        global.io.emit(`update_${ServerID}`, socketPayload);
+        global.io.emit(`update_${gateID}`, socketPayload);
       }
 
-      // ── Simpan time-series ke koleksi sensor_<ServerID> ────────────────
-      // Koleksi tetap dikey-kan ke ServerID (MAC Gateway) bukan RealID,
+      // ── Simpan time-series ke koleksi sensor_<gateID> ────────────────
+      // Koleksi tetap dikey-kan ke gateID (MAC Gateway) bukan nodeID,
       // karena satu Gateway bisa punya banyak node — data dari semua node
       // yang lewat gateway yang sama masuk ke koleksi yang sama,
-      // dan dibedakan oleh field RealID di dalam dokumen.
-      const SensorModel = getSensorModel(ServerID);
+      // dan dibedakan oleh field nodeID di dalam dokumen.
+      const SensorModel = getSensorModel(gateID);
       await new SensorModel({
-        ServerID,
-        RealID: RealID || '-',
+        gateID,
+        nodeID: nodeID || '-',
         Suhu: parseFloat(Suhu),
         Kelembapan: parseFloat(Kelembapan),
         gps_lat: gps_lat != null ? parseFloat(gps_lat) : null,
@@ -240,17 +240,17 @@ async handleGatewayRegister(data) {
         Checksum: Checksum || null,
         source: 'mqtt'
       }).save();
-      console.log(`✅ Data tersimpan → sensor_${ServerID} | Waktu: ${waktuUntukDB.toISOString()}`);
+      console.log(`✅ Data tersimpan → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
 
       // ── TUGAS 2: Bangun relasi Node → Gateway ──────────────────────────
-      // Hanya dijalankan jika RealID valid (bukan '-' atau kosong)
-      if (RealID && RealID !== '-') {
+      // Hanya dijalankan jika nodeID valid (bukan '-' atau kosong)
+      if (nodeID && nodeID !== '-') {
         // Cari Gateway induk di database
-        const gateway = await Gateway.findOne({ mac: ServerID.toUpperCase() });
+        const gateway = await Gateway.findOne({ mac: gateID.toUpperCase() });
 
         // UPSERT Node — jika node ini baru, daftarkan otomatis
         const node = await Node.findOneAndUpdate(
-          { serialId: RealID.toUpperCase() },
+          { serialId: nodeID.toUpperCase() },
           {
             $set: {
               gatewayId: gateway ? gateway._id : null,
@@ -264,19 +264,19 @@ async handleGatewayRegister(data) {
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
-        console.log(`🔗 [Relasi] Node ${RealID} → Gateway ${ServerID}${gateway ? ` (${gateway._id})` : ' (gateway belum terdaftar)'}`);
+        console.log(`🔗 [Relasi] Node ${nodeID} → Gateway ${gateID}${gateway ? ` (${gateway._id})` : ' (gateway belum terdaftar)'}`);
 
         // Alarm suhu per-node
         if (node.siteId) {
-          await this.checkAndCreateAlert(node, parseFloat(Suhu), RealID);
+          await this.checkAndCreateAlert(node, parseFloat(Suhu), nodeID);
         }
       }
 
       // ── Perbarui status Gateway (Device lama juga diupdate untuk kompatibilitas) ──
-      await this.updateGatewayStatus(ServerID, parseFloat(Suhu));
+      await this.updateGatewayStatus(gateID, parseFloat(Suhu));
 
       // ── ACK ke Gateway ──────────────────────────────────────────────────
-      this.publish(`LancsSK/ack/${ServerID}`, JSON.stringify({
+      this.publish(`LancsSK/ack/${gateID}`, JSON.stringify({
         status: 'success',
         message: 'Data diterima dan disimpan.'
       }));
@@ -289,20 +289,20 @@ async handleGatewayRegister(data) {
   // =========================================================================
   // HELPER: Perbarui status Gateway di model baru DAN Device lama
   // =========================================================================
-  async updateGatewayStatus(serverID, suhu) {
+  async updateGatewayStatus(gateID, suhu) {
     // Update Gateway model baru
     await Gateway.findOneAndUpdate(
-      { mac: serverID.toUpperCase() },
+      { mac: gateID.toUpperCase() },
       { $set: { isOnline: true, lastSeen: new Date() } }
     );
 
     // Update Device lama (backward compatibility untuk statusChecker, siteRoutes, dll)
-    let device = await Device.findOne({ serialID: serverID });
+    let device = await Device.findOne({ serialID: gateID });
     if (!device) {
-      console.log(`✨ Gateway baru di Device lama (${serverID}). Mendaftarkan...`);
+      console.log(`✨ Gateway baru di Device lama (${gateID}). Mendaftarkan...`);
       device = await Device.create({
-        serialID: serverID,
-        name: `Gateway ${serverID}`,
+        serialID: gateID,
+        name: `Gateway ${gateID}`,
         isClaimed: false,
         siteId: null,
         devicePassword: null
@@ -317,7 +317,7 @@ async handleGatewayRegister(data) {
       await this.checkAndCreateAlert(
         { siteId: device.siteId, minTemp: device.minTemp, maxTemp: device.maxTemp },
         suhu,
-        serverID
+        gateID
       );
     }
   }
