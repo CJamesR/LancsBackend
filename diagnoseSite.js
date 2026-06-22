@@ -25,10 +25,10 @@ async function diagnose() {
     });
 
     if (!rawSite) {
-        console.log(`❌ Site ${SITE_ID} TIDAK ADA di koleksi "sites"`);
-        console.log('   → Kemungkinan: sudah dihapus tapi masih direferensikan di tempat lain\n');
+        console.log(`❌ Site ${SITE_ID} ARE NOT inside "sites" collection`);
+        console.log('   → Possibility: already erased but still being referenced to other place\n');
     } else {
-        console.log(`✅ Site DITEMUKAN:`);
+        console.log(`✅ Site FOUND:`);
         console.log(JSON.stringify(rawSite, null, 2));
         console.log('');
     }
@@ -38,7 +38,7 @@ async function diagnose() {
     // =========================================================
     if (rawSite && rawSite.ownerId) {
         console.log('='.repeat(60));
-        console.log('CEK 2: Cek apakah owner site masih ada di "users"');
+        console.log('CEK 2: Check if the owner site still exist on "users"');
         console.log('='.repeat(60));
 
         const owner = await db.collection('users').findOne({ 
@@ -46,10 +46,10 @@ async function diagnose() {
         });
 
         if (!owner) {
-            console.log(`❌ User dengan _id ${rawSite.ownerId} TIDAK ADA di koleksi "users"`);
-            console.log('   → INI PENYEBABNYA: Owner sudah dihapus, site jadi orphan\n');
+            console.log(`❌ User dengan _id ${rawSite.ownerId} ARE NOT inside "users" collection`);
+            console.log('   → THE PROBLEM: Owner already been erased, site is orphan\n');
         } else {
-            console.log(`✅ Owner ditemukan: ${owner.username} (${owner.email})\n`);
+            console.log(`✅ Owner found: ${owner.username} (${owner.email})\n`);
         }
     }
 
@@ -57,7 +57,7 @@ async function diagnose() {
     // 3. Scan semua site — temukan semua yang ownernya tidak ada
     // =========================================================
     console.log('='.repeat(60));
-    console.log('CEK 3: Scan SEMUA site untuk temukan orphan');
+    console.log('CEK 3: Scan ALL site to detect any orphan');
     console.log('='.repeat(60));
 
     const allSites = await db.collection('sites').find({}).toArray();
@@ -66,14 +66,14 @@ async function diagnose() {
     let orphanCount = 0;
     for (const site of allSites) {
         if (!site.ownerId) {
-            console.log(`⚠️  Site "${site.name}" (${site._id}) — ownerId field KOSONG/NULL`);
+            console.log(`⚠️  Site "${site.name}" (${site._id}) — ownerId field EMPTY/NULL`);
             orphanCount++;
             continue;
         }
 
         const owner = await db.collection('users').findOne({ _id: site.ownerId });
         if (!owner) {
-            console.log(`⚠️  Site "${site.name}" (${site._id}) — owner ${site.ownerId} TIDAK ADA di users`);
+            console.log(`⚠️  Site "${site.name}" (${site._id}) — owner ${site.ownerId} ARE NOT inside users`);
             orphanCount++;
         }
     }
@@ -91,7 +91,7 @@ async function diagnose() {
     // 4. Cek referensi balik: apakah site ini ada di members array user lain
     // =========================================================
     console.log('='.repeat(60));
-    console.log(`CEK 4: Apakah ada user yang punya referensi ke site ${SITE_ID}`);
+    console.log(`CEK 4: Are there any user who have reference to site ${SITE_ID}`);
     console.log('='.repeat(60));
 
     // Site ID tidak disimpan di user model (relasi satu arah: site punya members)
@@ -116,7 +116,7 @@ async function diagnose() {
     // =========================================================
     if (process.argv.includes('--cleanup')) {
         console.log('='.repeat(60));
-        console.log('CLEANUP: Menghapus semua orphan site...');
+        console.log('CLEANUP: Delete all orphan site...');
         console.log('='.repeat(60));
 
         for (const site of allSites) {
@@ -135,7 +135,7 @@ async function diagnose() {
             }
         }
 
-        console.log('\n✅ Cleanup selesai');
+        console.log('\n✅ Cleanup Done');
     }
 
     await mongoose.disconnect();
