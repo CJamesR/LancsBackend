@@ -20,7 +20,7 @@ const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 // =========================================================================
 const extractUserId = (req) => {
     const raw = req.user?._id ?? req.user?.userId ?? req.user?.id;
-    if (!raw) throw new Error("User ID tidak ditemukan di token JWT. Periksa authMiddleware.");
+    if (!raw) throw new Error("User ID not found at JWT Token. Check authMiddleware.");
     return raw.toString();
 };
 
@@ -28,7 +28,7 @@ const apiLimiter = rateLimiter({
     windowMs: 1 * 60 * 1000,
     max: 20,
     message: {
-        success: false, message: 'Terlalu banyak request. Coba lagi nanti'
+        success: false, message: 'Too many requests. Please try again later'
     }
 });
 
@@ -43,7 +43,7 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
 
         const site = await Site.findById(siteId).populate('ownerId', 'username');
         if (!site) {
-            return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+            return res.status(404).json({ success: false, message: 'Site not Found' });
         }
 
         // Cek Hak Akses
@@ -58,10 +58,9 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
         } else if (adminRecord) {
             allowedGateways = site.devices; 
         } else if (memberRecord) {
-            // Member bisa melihat semua perangkat di dalam site
             allowedGateways = site.devices; 
         } else {
-            return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini' });
+            return res.status(403).json({ success: false, message: 'Access denied for this Site' });
         }
 
         // Ambil data sensor terbaru
@@ -100,7 +99,6 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
             success: true,
             siteName: site.name,
             ownerName: isOwner ? "Anda" : site.ownerId.username,
-            // Deteksi role apa yang sedang mengakses untuk dikirim ke frontend
             role: isOwner ? 'owner' : (adminRecord ? 'admin' : 'member'),
             data: devicesWithData
         });
@@ -123,7 +121,7 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
 //         // Menggunakan ObjectId bawaan sesuai keputusan penghapusan custom string
 //         const site = await Site.findById(siteId).populate('ownerId', 'username');
 //         if (!site) {
-//             return res.status(404).json({ success: false, message: 'Site tidak ditemukan' });
+//             return res.status(404).json({ success: false, message: 'Site not Found' });
 //         }
 
 //         // Cek Hak Akses
@@ -137,7 +135,7 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
 //         } else if (adminRecord) {
 //             allowedDeviceIds = adminRecord.allowedDevices; 
 //         } else {
-//             return res.status(403).json({ success: false, message: 'Akses ditolak ke Site ini' });
+//             return res.status(403).json({ success: false, message: 'Access denied for this Site' });
 //         }
 
 //         // Ambil Gateway berdasarkan Hak Akses
@@ -216,7 +214,7 @@ router.get('/device/:deviceId/detail', async (req, res) => {
 
         const site = await Site.findById(device.siteId);
         if (!site) {
-            return res.status(404).json({ success: false, message: 'Site untuk alat ini tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Site for this device not ditemukan.' });
         }
 
         // Variabel Hak Akses
@@ -228,7 +226,7 @@ router.get('/device/:deviceId/detail', async (req, res) => {
         const isMember = site.members && site.members.some(m => m.userId.toString() === userId);
 
         if (!isOwner && !isAdminAllowed && !isMember) {
-            return res.status(403).json({ success: false, message: 'Akses ditolak ke data alat ini' });
+            return res.status(403).json({ success: false, message: 'Access denied for this device data' });
         }
 
         const SensorModel = getSensorModel(deviceId);
@@ -367,7 +365,7 @@ router.patch('/device/:id/rename', async (req, res) => {
         );
 
         if (!updatedDevice) {
-            return res.status(404).json({ success: false, message: "Perangkat tidak ditemukan" });
+            return res.status(404).json({ success: false, message: "Device not found" });
         }
 
         if (updatedDevice.siteId) {
@@ -382,10 +380,10 @@ router.patch('/device/:id/rename', async (req, res) => {
             global.io.emit('device_renamed', { deviceId: updatedDevice.serialID, newName: updatedDevice.name }); 
         }
 
-        res.status(200).json({ success: true, message: "Nama perangkat berhasil diubah", data: updatedDevice });
+        res.status(200).json({ success: true, message: "Device name updated successfully", data: updatedDevice });
     } catch (error) {
         console.error("❌ Error Rename Device:", error);
-        res.status(500).json({ success: false, error: "Gagal mengubah nama perangkat" });
+        res.status(500).json({ success: false, error: "Failed to update device name" });
     }
 });
 
@@ -401,7 +399,7 @@ router.get('/invites/pending', async (req, res) => {
         const User = require('../models/userModel');
         const currentUser = await User.findById(userId).select('email');
         if (!currentUser) {
-            return res.status(404).json({ success: false, message: 'User tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'User not Found.' });
         }
 
         // Cari semua invite pending yang ditujukan ke email ini
@@ -444,37 +442,37 @@ router.post('/invites/:inviteId/respond', async (req, res) => {
         console.log("Menerima request Invite Respond:", req.params.inviteId, req.body);
 
         if (!action || !['accept', 'decline'].includes(action)) {
-            return res.status(400).json({ success: false, message: 'action harus "accept" atau "decline".' });
+            return res.status(400).json({ success: false, message: 'action must be "accept" or "decline".' });
         }
 
         // Temukan invite
         const invite = await Invite.findById(inviteId);
         if (!invite) {
-            return res.status(404).json({ success: false, message: 'Undangan tidak ditemukan atau sudah direspons.' });
+            return res.status(404).json({ success: false, message: 'Invite not found or already responded.' });
         }
 
         if (invite.status !== 'pending') {
-            return res.status(400).json({ success: false, message: `Undangan ini sudah berstatus "${invite.status}".` });
+            return res.status(400).json({ success: false, message: `This invite is already ${invite.status}.` });
         }
 
         // Pastikan yang merespons adalah user yang diundang
         const User = require('../models/userModel');
         const currentUser = await User.findById(userId).select('email username');
         if (!currentUser || currentUser.email.toLowerCase() !== invite.recipientEmail) {
-            return res.status(403).json({ success: false, message: 'Anda tidak berhak merespons undangan ini.' });
+            return res.status(403).json({ success: false, message: 'You are not authorized to respond to this invite.' });
         }
 
         if (action === 'decline') {
             // Tolak — hapus record invite
             await Invite.findByIdAndDelete(inviteId);
-            return res.json({ success: true, message: 'Undangan berhasil ditolak.' });
+            return res.json({ success: true, message: 'Invite rejected successfully.' });
         }
 
         // ACCEPT — tambahkan user ke Site
         const site = await Site.findById(invite.siteId);
         if (!site) {
             await Invite.findByIdAndDelete(inviteId);
-            return res.status(404).json({ success: false, message: 'Site tidak lagi tersedia. Undangan dihapus.' });
+            return res.status(404).json({ success: false, message: 'Site not found. Invite deleted.' });
         }
 
         // Cek lagi apakah user sudah ada di site (double-check)
@@ -504,7 +502,7 @@ router.post('/invites/:inviteId/respond', async (req, res) => {
 
         res.json({
             success: true,
-            message: `Berhasil bergabung ke Site "${site.name}" sebagai ${invite.role}.`,
+            message: `Successfully joined Site "${site.name}" as ${invite.role}.`,
             site: {
                 id: site._id,
                 name: site.name,
@@ -528,7 +526,7 @@ router.patch('/user/fcm-token', async (req, res) => {
         const userId = extractUserId(req);
 
         if (!fcmToken) {
-            return res.status(400).json({ success: false, message: "Token FCM tidak boleh kosong" });
+            return res.status(400).json({ success: false, message: "FCM Token must not empty" });
         }
 
         // Panggil model User dan update tokennya
@@ -536,7 +534,7 @@ router.patch('/user/fcm-token', async (req, res) => {
         await User.findByIdAndUpdate(userId, { fcmToken: fcmToken });
         
         console.log(`✅ FCM Token berhasil diupdate untuk User ID: ${userId}`);
-        res.json({ success: true, message: "Token FCM berhasil diperbarui" });
+        res.json({ success: true, message: "FCM Token updated successfully" });
         
     } catch (error) {
         console.error("❌ Error Update FCM Token:", error);
@@ -651,7 +649,7 @@ router.post('/gateway/:mac/cmd', async (req, res) => {
         if (!cmd || !allowedCmds.includes(cmd)) {
             return res.status(400).json({
                 success: false,
-                message: `Perintah tidak valid. Pilihan: ${allowedCmds.join(', ')}`
+                message: `Command is not valid. Options: ${allowedCmds.join(', ')}`
             });
         }
 
@@ -660,7 +658,7 @@ router.post('/gateway/:mac/cmd', async (req, res) => {
             if (!ssid || !password) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Perintah set_wifi membutuhkan field ssid dan password.'
+                    message: 'Command set_wifi requires ssid and password fields.'
                 });
             }
         }
@@ -668,10 +666,10 @@ router.post('/gateway/:mac/cmd', async (req, res) => {
         // Validasi kepemilikan Gateway
         const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
         if (!gateway) {
-            return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Gateway not found.' });
         }
         if (!gateway.ownerId || gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Anda bukan pemilik Gateway ini.' });
+            return res.status(403).json({ success: false, message: 'You are not the owner of this Gateway.' });
         }
 
         // Rakit payload tambahan sesuai cmd
@@ -686,7 +684,7 @@ router.post('/gateway/:mac/cmd', async (req, res) => {
         if (!sent) {
             return res.status(503).json({
                 success: false,
-                message: 'MQTT broker tidak terhubung. Perintah tidak dapat dikirim.'
+                message: 'MQTT broker is not connected. Command cannot be sent.'
             });
         }
 
@@ -700,7 +698,7 @@ router.post('/gateway/:mac/cmd', async (req, res) => {
 
         res.json({
             success: true,
-            message: `Perintah '${cmd}' berhasil dikirim ke Gateway ${mac.toUpperCase()}.`,
+            message: `Command '${cmd}' sent successfully to Gateway ${mac.toUpperCase()}.`,
             sent: { cmd, ...extraPayload }
         });
 
@@ -723,8 +721,8 @@ router.get('/gateway/:mac/nodes', async (req, res) => {
         const userId  = extractUserId(req);
 
         const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
-        if (!gateway) return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan.' });
-        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) return res.status(403).json({ success: false, message: 'Anda bukan pemilik Gateway ini.' });
+        if (!gateway) return res.status(404).json({ success: false, message: 'Gateway not found.' });
+        if (!gateway.ownerId || gateway.ownerId.toString() !== userId) return res.status(403).json({ success: false, message: 'You are not the owner of this Gateway.' });
 
         const nodes = await Node.find({ gatewayId: gateway._id }).lean();
         
@@ -773,17 +771,17 @@ router.patch('/gateway/:mac/rename', protect, apiLimiter, async (req, res) => {
         const userId = extractUserId(req);
 
         if (!newName || newName.trim() === '') {
-            return res.status(400).json({ success: false, message: 'Nama baru tidak boleh kosong.' });
+            return res.status(400).json({ success: false, message: 'New name must not be empty.' });
         }
 
         const gateway = await Gateway.findOne({ mac: mac.toUpperCase() });
         if (!gateway) {
-            return res.status(404).json({ success: false, message: 'Gateway tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Gateway not found.' });
         }
 
         // Otorisasi: Hanya pemilik Gateway yang boleh mengubah nama
         if (!gateway.ownerId || gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda bukan pemilik Gateway ini.' });
+            return res.status(403).json({ success: false, message: 'You are not the owner of this Gateway.' });
         }
 
         gateway.name = newName.trim();
@@ -791,13 +789,13 @@ router.patch('/gateway/:mac/rename', protect, apiLimiter, async (req, res) => {
 
         res.json({ 
             success: true, 
-            message: 'Nama Gateway berhasil diperbarui.',
+            message: 'Gateway name updated successfully.',
             data: { mac: gateway.mac, name: gateway.name }
         });
 
     } catch (error) {
         console.error('❌ Error Rename Gateway:', error.message);
-        res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+        res.status(500).json({ success: false, message: 'An error occurred on the server.' });
     }
 });
 
@@ -812,20 +810,20 @@ router.patch('/node/:serialId/rename', protect, apiLimiter, async (req, res) => 
         const userId = extractUserId(req);
 
         if (!newName || newName.trim() === '') {
-            return res.status(400).json({ success: false, message: 'Nama baru tidak boleh kosong.' });
+            return res.status(400).json({ success: false, message: 'New name must not be empty.' });
         }
 
         // populate('gatewayId') digunakan untuk mengambil data Induk secara bersamaan
         const node = await Node.findOne({ serialId: serialId.toUpperCase() }).populate('gatewayId');
         
         if (!node) {
-            return res.status(404).json({ success: false, message: 'Node tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Node not found.' });
         }
 
         // Otorisasi: Cek apakah user adalah pemilik dari Gateway induk
         const gateway = node.gatewayId;
         if (!gateway || !gateway.ownerId || gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda bukan pemilik jaringan Node ini.' });
+            return res.status(403).json({ success: false, message: 'You are not the owner of this Gateway.' });
         }
 
         node.name = newName.trim();
@@ -833,13 +831,13 @@ router.patch('/node/:serialId/rename', protect, apiLimiter, async (req, res) => 
 
         res.json({ 
             success: true, 
-            message: 'Nama Node berhasil diperbarui.',
+            message: 'Node name updated successfully.',
             data: { serialId: node.serialId, name: node.name }
         });
 
     } catch (error) {
         console.error('❌ Error Rename Node:', error.message);
-        res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+        res.status(500).json({ success: false, message: 'An error occurred on the server.' });
     }
 });
 
@@ -855,17 +853,17 @@ router.get('/node/:serialId/detail', protect, async (req, res) => {
         // 1. Cari Node dan muat data Gateway induknya
         const node = await Node.findOne({ serialId: serialId.toUpperCase() }).populate('gatewayId');
         if (!node) {
-            return res.status(404).json({ success: false, message: 'Node tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Node not found.' });
         }
 
         const gateway = node.gatewayId;
         if (!gateway) {
-            return res.status(400).json({ success: false, message: 'Inkonsistensi Data: Node belum terikat ke Gateway manapun.' });
+            return res.status(400).json({ success: false, message: 'Data Inconsistency: Node is not associated with any Gateway.' });
         }
 
         // 2. Validasi Kepemilikan (Atau Hak Akses Site)
         if (gateway.ownerId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda tidak memiliki akses ke Node ini.' });
+            return res.status(403).json({ success: false, message: 'Access Denied: You do not have access to this Node.' });
         }
 
         // 3. Ambil data historis 24 jam terakhir dari koleksi dinamis Mongoose
@@ -921,7 +919,7 @@ router.post('/gateways/register', async (req, res) => {
         const { serialId, user_token } = req.body;
 
         if (!serialId || !user_token) {
-            return res.status(400).json({ success: false, message: 'serialId dan user_token wajib dikirim.' });
+            return res.status(400).json({ success: false, message: 'serialId and user_token are required.' });
         }
 
         const jwt = require('jsonwebtoken');
@@ -929,7 +927,7 @@ router.post('/gateways/register', async (req, res) => {
         try {
             decoded = jwt.verify(user_token, process.env.JWT_SECRET);
         } catch (err) {
-            return res.status(401).json({ success: false, message: 'Token otentikasi tidak valid atau kedaluwarsa.' });
+            return res.status(401).json({ success: false, message: 'Invalid or expired authentication token.' });
         }
 
         // Lakukan UPSERT: Daftarkan Gateway atau perbarui kepemilikannya
@@ -948,13 +946,13 @@ router.post('/gateways/register', async (req, res) => {
 
         res.status(200).json({ 
             success: true, 
-            message: 'Gateway berhasil didaftarkan ke server Node.js', 
+            message: 'Gateway registered successfully with the Node.js server', 
             data: gateway 
         });
 
     } catch (error) {
         console.error('❌ Error Gateway Registration via HTTP:', error.message);
-        res.status(500).json({ success: false, message: 'Kesalahan internal server.' });
+        res.status(500).json({ success: false, message: 'Internal server error.' });
     }
 });
 
@@ -1014,13 +1012,13 @@ router.post('/sites/:siteId/gateways/:mac/command', protect, checkSiteRole(['own
         const { command } = req.body; 
 
         if (!command) {
-            return res.status(400).json({ success: false, message: "Perintah (command) wajib diisi." });
+            return res.status(400).json({ success: false, message: "Command is required." });
         }
 
         // Pastikan gateway valid sebelum mengirim perintah
         const gateway = await Gateway.findOne({ mac: mac.toUpperCase(), siteId: siteId });
         if (!gateway) {
-            return res.status(404).json({ success: false, message: "Gateway tidak ditemukan di Site ini." });
+            return res.status(404).json({ success: false, message: "Gateway not found in this Site." });
         }
 
         // Tembakkan perintah MQTT
@@ -1035,7 +1033,7 @@ router.post('/sites/:siteId/gateways/:mac/command', protect, checkSiteRole(['own
 
         res.status(200).json({ 
             success: true, 
-            message: `Perintah '${command}' berhasil dikirim ke Gateway.` 
+            message: `Command '${command}' sent successfully to Gateway.` 
         });
 
     } catch (error) {

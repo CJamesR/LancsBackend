@@ -11,8 +11,8 @@ const otpCache = new NodeCache({ stdTTL: 300 });
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-       user: process.env.EMAIL_USER,
-       pass: process.env.EMAIL_PASS
+       user: process.env.SMTP_EMAIL,
+       pass: process.env.SMTP_PASS
     }
 });
 
@@ -35,7 +35,7 @@ exports.requestOTP = async (req, res) => {
 
         // Kirim emailnya
         const mailOptions = {
-            from: 'Sistem Keamanan IoT <email.anda@gmail.com>',
+            from: 'Sistem Keamanan IoT <' + process.env.SMTP_EMAIL + '>',
             to: email,
             subject: 'Kode OTP Konfirmasi Anda',
             html: `

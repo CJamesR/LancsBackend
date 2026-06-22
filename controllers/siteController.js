@@ -50,7 +50,7 @@ exports.getMySites = async (req, res) => {
             } else if (site.admins.some(a => a.userId.toString() === userId.toString())) {
                 role = 'admin';
             } else if (site.members && site.members.some(m => m.userId.toString() === userId.toString())) {
-                role = memberData.role;
+                role = memberData?.role || 'member';
             }
 
             const responseData = {
