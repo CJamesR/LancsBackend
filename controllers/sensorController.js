@@ -47,7 +47,7 @@ exports.addSensorData = async (req, res) => {
       if (!isNaN(parsedTime.getTime())) {
         recordTime = parsedTime;
       } else {
-        console.log(`⚠️ Format DeviceTime tidak valid (${DeviceTime}), fallback ke waktu server.`);
+        console.log(`⚠️ Invalid DeviceTime format (${DeviceTime}), fallback to server time.`);
       }
     }
 
@@ -110,7 +110,7 @@ exports.addSensorData = async (req, res) => {
               title: title,
               message: message
             });
-            console.log(`⚠️ ALARM HTTP TERPICU: ${title} pada ${device.name || gateID}`);
+            console.log(`⚠️ HTTP ALARM TRIGGERED: ${title} on ${device.name || gateID}`);
           }
         }
       }
@@ -127,7 +127,7 @@ exports.addSensorData = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: `Data berhasil disimpan ke sensor_${gateID}`,
+      message: `Data successfully saved to sensor_${gateID}`,
       data: {
         ...saved._doc,
         Waktu: recordTime.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }) 
@@ -190,7 +190,7 @@ exports.getSensorData = async (req, res) => {
 exports.getAllSensors = async (req, res) => {
   res.status(410).json({
     success: false,
-    message: 'Endpoint ini sudah dimatikan. Silakan gunakan API Site Dashboard (/api/flutter/sites/:siteId/dashboard).'
+    message: 'This endpoint has been disabled. Please use the Site Dashboard API (/api/flutter/sites/:siteId/dashboard).'
   });
 };
 
@@ -232,7 +232,7 @@ exports.deleteSensorData = async (req, res) => {
 exports.getUserGateways = async (req, res) => {
   res.status(410).json({
     success: false,
-    message: 'Endpoint ini sudah dimatikan. Silakan gunakan API Site Dashboard (/api/flutter/sites/:siteId/dashboard).'
+    message: 'This endpoint has been disabled. Please use the Site Dashboard API (/api/flutter/sites/:siteId/dashboard).'
   });
 };
 // @desc    Get latest sensor data (for Flutter real-time display)

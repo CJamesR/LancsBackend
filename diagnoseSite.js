@@ -61,7 +61,7 @@ async function diagnose() {
     console.log('='.repeat(60));
 
     const allSites = await db.collection('sites').find({}).toArray();
-    console.log(`Total site di DB: ${allSites.length}`);
+    console.log(`Total site in DB: ${allSites.length}`);
 
     let orphanCount = 0;
     for (const site of allSites) {
@@ -79,11 +79,11 @@ async function diagnose() {
     }
 
     if (orphanCount === 0) {
-        console.log('✅ Tidak ada orphan site ditemukan\n');
+        console.log('✅ No orphan site were found\n');
     } else {
-        console.log(`\n❌ Total orphan site: ${orphanCount}`);
-        console.log('   → Jalankan CLEANUP di bawah ini jika ingin hapus:\n');
-        console.log('   Opsi A — Hapus site orphan dari DB:');
+        console.log(`\n❌ Orphan site Total: ${orphanCount}`);
+        console.log('   → Execute CLEANUP from below if wanted to be cleared:\n');
+        console.log('   Opsi A — Delete orphan site from DB:');
         console.log('   node diagnoseSite.js --cleanup\n');
     }
 

@@ -13,7 +13,7 @@ router.use(protect);
 router.get('/', async (req, res) => {
   res.status(410).json({
     success: false,
-    message: 'Endpoint /api/devices sudah dimatikan'
+    message: 'Endpoint /api/devices has been disabled'
   });
 });
 
@@ -23,7 +23,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   res.status(410).json({
     success: false,
-    message: 'Endpoint ini sudah dimatikan. Gunakan fitur NFC Claiming di menu Site.'
+    message: 'This endpoint has been disabled. Use the NFC Claiming feature in the Site menu.'
   });
 });
 
@@ -33,7 +33,7 @@ router.post('/', async (req, res) => {
 router.delete('/:deviceId', async (req, res) => {
   res.status(410).json({
     success: false,
-    message: 'Endpoint ini dimatikan. Gunakan fitur Remove Device di dalam menu Site.'
+    message: 'This endpoint has been disabled. Use the Remove Device feature in the Site menu.'
   });
 });
 
@@ -43,7 +43,7 @@ router.delete('/:deviceId', async (req, res) => {
 router.put('/:deviceId', async (req, res) => {
   res.status(410).json({
     success: false,
-    message: 'Endpoint ini dimatikan. Gunakan fitur pengaturan di dalam menu Site.'
+    message: 'This endpoint has been disabled. Use the Settings feature in the Site menu.'
   });
 });
 

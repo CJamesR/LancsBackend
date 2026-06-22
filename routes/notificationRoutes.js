@@ -21,14 +21,14 @@ router.get('/:siteId', protect, async (req, res) => {
         // 1. Validasi Akses: Pastikan user berhak melihat site ini
         const site = await Site.findById(siteId);
         if (!site) {
-            return res.status(404).json({ success: false, message: 'Site tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Site not found.' });
         }
 
         const isOwner = site.ownerId.toString() === userId;
         const isAdmin = site.admins.some(admin => admin.userId.toString() === userId);
 
         if (!isOwner && !isAdmin) {
-            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda tidak memiliki izin untuk melihat notifikasi Site ini.' });
+            return res.status(403).json({ success: false, message: 'Access Denied: You do not have permission to view notifications for this site.' });
         }
 
         // 2. Ambil data notifikasi (Max 50 terbaru agar aplikasi tidak lemot)
@@ -57,7 +57,7 @@ router.get('/:siteId', protect, async (req, res) => {
 
     } catch (error) {
         console.error("❌ Error get notifications:", error);
-        res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+        res.status(500).json({ success: false, message: 'An error occurred on the server.' });
     }
 });
 
@@ -71,17 +71,17 @@ router.put('/:id/read', protect, async (req, res) => {
 
         const notif = await Notification.findById(notifId);
         if (!notif) {
-            return res.status(404).json({ success: false, message: 'Notifikasi tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Notification not found.' });
         }
 
         // Ubah status menjadi sudah dibaca
         notif.isRead = true;
         await notif.save();
 
-        res.json({ success: true, message: 'Notifikasi ditandai sudah dibaca.' });
+        res.json({ success: true, message: 'Notification marked as read.' });
 
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server.' });
+        res.status(500).json({ success: false, message: 'An error occurred on the server.' });
     }
 });
 

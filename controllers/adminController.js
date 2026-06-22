@@ -14,7 +14,7 @@ exports.getAllUsers = async (req, res) => {
   } catch (error) {
     console.error('❌ Error get all users:', error.message);
     res.status(500).json({ 
-      message: 'Terjadi kesalahan pada server',
+      message: 'An error occurred on the server',
       error: error.message 
     });
   }
@@ -27,7 +27,7 @@ exports.getUserById = async (req, res) => {
     
     if (!user) {
       return res.status(404).json({ 
-        message: 'Pengguna tidak ditemukan' 
+        message: 'User not found' 
       });
     }
 
@@ -36,7 +36,7 @@ exports.getUserById = async (req, res) => {
   } catch (error) {
     console.error('❌ Error get user by id:', error.message);
     res.status(500).json({ 
-      message: 'Terjadi kesalahan pada server',
+      message: 'An error occurred on the server',
       error: error.message 
     });
   }
@@ -52,7 +52,7 @@ exports.updateUser = async (req, res) => {
     
     if (!user) {
       return res.status(404).json({ 
-        message: 'Pengguna tidak ditemukan' 
+        message: 'User not found' 
       });
     }
 
@@ -64,14 +64,14 @@ exports.updateUser = async (req, res) => {
     await user.save();
 
     res.json({
-      message: 'Data pengguna berhasil diperbarui',
+      message: 'User data updated successfully',
       user: user.toJSON()
     });
 
   } catch (error) {
     console.error('❌ Error update user:', error.message);
     res.status(500).json({ 
-      message: 'Terjadi kesalahan pada server',
+      message: 'An error occurred on the server',
       error: error.message 
     });
   }
@@ -85,7 +85,7 @@ exports.deleteUser = async (req, res) => {
     // Cek jika menghapus diri sendiri
     if (userId === req.user.id) {
       return res.status(400).json({ 
-        message: 'Tidak dapat menghapus akun sendiri' 
+        message: 'Cannot delete your own account' 
       });
     }
 
@@ -93,18 +93,18 @@ exports.deleteUser = async (req, res) => {
     
     if (!user) {
       return res.status(404).json({ 
-        message: 'Pengguna tidak ditemukan' 
+        message: 'User not found' 
       });
     }
 
     res.json({
-      message: 'Pengguna berhasil dihapus'
+      message: 'User deleted successfully'
     });
 
   } catch (error) {
     console.error('❌ Error delete user:', error.message);
     res.status(500).json({ 
-      message: 'Terjadi kesalahan pada server',
+      message: 'An error occurred on the server',
       error: error.message 
     });
   }
@@ -114,7 +114,7 @@ exports.deleteUser = async (req, res) => {
 exports.addSensorAccess = async (req, res) => {
   res.status(410).json({ 
     success: false,
-    message: 'Sistem sensorAccess lama telah dimatikan. Gunakan fitur Invite Admin pada menu Site.' 
+    message: 'The old SensorAccess system has been disabled. Use the Invite Admin feature in the Site menu.' 
   });
 };
 
@@ -122,6 +122,6 @@ exports.addSensorAccess = async (req, res) => {
 exports.removeSensorAccess = async (req, res) => {
   res.status(410).json({ 
     success: false,
-    message: 'Sistem sensorAccess lama telah dimatikan. Gunakan fitur Remove Admin pada menu Site.' 
+    message: 'The old SensorAccess system has been disabled. Use the Remove Admin feature in the Site menu.' 
   });
 };

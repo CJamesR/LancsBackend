@@ -7,7 +7,7 @@ const checkSensorAccess = async (req, res, next) => {
     const user = req.user;
     
     if (!user) {
-      return res.status(401).json({ message: 'Tidak terautentikasi' });
+      return res.status(401).json({ message: 'Not authenticated' });
     }
     
     // Admin sistem (Superadmin) dapat mengakses semua sensor
@@ -18,13 +18,13 @@ const checkSensorAccess = async (req, res, next) => {
     // Cari alat ini terdaftar di Site mana
     const device = await Device.findOne({ serialID: sensorId });
     if (!device || !device.siteId) {
-        return res.status(403).json({ message: 'Alat belum terdaftar di Site manapun.' });
+        return res.status(403).json({ message: 'Device not registered in any site.' });
     }
 
     // Cari Site-nya
     const site = await Site.findById(device.siteId);
     if (!site) {
-        return res.status(403).json({ message: 'Site untuk alat ini tidak ditemukan.' });
+        return res.status(403).json({ message: 'Site for this device not found.' });
     }
 
     // Cek apakah user adalah Admin dari Site ini
@@ -43,11 +43,11 @@ const checkSensorAccess = async (req, res, next) => {
     }
     
     res.status(403).json({ 
-      message: 'Akses ditolak. Anda tidak memiliki izin untuk melihat data sensor ini.' 
+      message: 'Access denied. You do not have permission to view data for this sensor.' 
     });
 
   } catch (error) {
-    res.status(500).json({ message: "Kesalahan server saat memvalidasi akses.", error: error.message });
+    res.status(500).json({ message: "Server error while validating access.", error: error.message });
   }
 };
 

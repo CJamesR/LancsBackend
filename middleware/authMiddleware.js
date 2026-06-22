@@ -56,10 +56,10 @@ exports.checkSiteRole = (allowedRoles) => {
           const siteId = req.params.siteId || req.body.siteId;
           const userId = req.user?.userId || req.user?._id;
 
-          if (!siteId) return res.status(400).json({ success: false, message: "Site ID diperlukan untuk verifikasi akses (RBAC)." });
+          if (!siteId) return res.status(400).json({ success: false, message: "Site ID is required for access verification (RBAC)." });
 
           const site = await Site.findById(siteId);
-          if (!site) return res.status(404).json({ success: false, message: "Site tidak ditemukan." });
+          if (!site) return res.status(404).json({ success: false, message: "Site not found." });
 
           const isOwner = site.ownerId.toString() === userId.toString();
           
@@ -82,11 +82,11 @@ exports.checkSiteRole = (allowedRoles) => {
 
           return res.status(403).json({ 
               success: false, 
-              message: `Akses Ditolak: Anda login sebagai ${userRole || 'tamu'}, sistem membutuhkan izin [${allowedRoles.join(' / ')}].` 
+              message: `Access Denied: You are logged in as ${userRole || 'guest'}, the system requires permission [${allowedRoles.join(' / ')}].` 
           });
 
       } catch (error) {
-          res.status(500).json({ success: false, message: "Kesalahan pada sistem keamanan (RBAC).", error: error.message });
+          res.status(500).json({ success: false, message: "Error in security system (RBAC).", error: error.message });
       }
   };
 };
@@ -115,6 +115,6 @@ exports.gatewayAuth = async (req, res, next) => {
 };
 
 exports.checkSensorAccess = (req, res, next) => {
-    console.warn("⚠️ Peringatan: checkSensorAccess di authMiddleware.js dipanggil. Gunakan checkSiteRole yang baru!");
+    console.warn("⚠️ Warning: checkSensorAccess in authMiddleware.js is called. Use the new checkSiteRole!");
     next();
 };

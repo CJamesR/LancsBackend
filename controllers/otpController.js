@@ -24,7 +24,7 @@ exports.requestOTP = async (req, res) => {
         const { email } = req.body;
 
         if (!email) {
-            return res.status(400).json({ success: false, message: "Email tujuan wajib diisi!" });
+            return res.status(400).json({ success: false, message: "Email destination is required!" });
         }
 
         // Bikin 6 digit angka acak yang aman dari hacker
@@ -48,12 +48,12 @@ exports.requestOTP = async (req, res) => {
 
         res.status(200).json({ 
             success: true, 
-            message: "OTP berhasil dikirim ke email Anda. Berlaku 5 menit." 
+            message: "OTP successfully sent to your email. Valid for 5 minutes." 
         });
 
     } catch (error) {
-        console.error("Gagal mengirim email:", error);
-        res.status(500).json({ success: false, message: "Gagal mengirim OTP" });
+        console.error("Failed to send email:", error);
+        res.status(500).json({ success: false, message: "Failed to send OTP" });
     }
 };
 
@@ -68,7 +68,7 @@ exports.verifyOTP = async (req, res) => {
         if (!otpCache.has(email)) {
             return res.status(400).json({ 
                 success: false, 
-                message: "OTP sudah kedaluwarsa atau Anda belum meminta OTP." 
+                message: "OTP has expired or you have not requested OTP. Please request a new one." 
             });
         }
 
@@ -81,17 +81,17 @@ exports.verifyOTP = async (req, res) => {
             
             return res.status(200).json({ 
                 success: true, 
-                message: "Verifikasi Berhasil! Silakan lanjutkan proses." 
+                message: "Verification Successful! Please continue the process." 
             });
         } else {
             // SALAH!
             return res.status(400).json({ 
                 success: false, 
-                message: "Kode OTP salah!" 
+                message: "Invalid OTP!" 
             });
         }
 
     } catch (error) {
-        res.status(500).json({ success: false, message: "Terjadi kesalahan server" });
+        res.status(500).json({ success: false, message: "An error occurred on the server" });
     }
 };

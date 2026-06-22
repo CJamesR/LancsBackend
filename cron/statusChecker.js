@@ -6,7 +6,7 @@ const startOfflineChecker = () => {
     // Cron job ini akan berjalan otomatis setiap 5 menit (*/5 * * * *)
     cron.schedule('*/5 * * * *', async () => {
         try {
-            console.log('🕵️‍♂️ [CRON] Memeriksa status sensor (Offline Check)...');
+            console.log('🕵️‍♂️ [CRON] Checking Sensor Status (Offline Check)...');
             
             // Tentukan batas waktu: 10 menit yang lalu dari waktu sekarang
             const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
@@ -32,14 +32,14 @@ const startOfflineChecker = () => {
                     siteId: device.siteId,
                     deviceId: device.serialID,
                     type: 'STATUS_OFFLINE',
-                    title: 'Sensor Terputus (Offline)',
-                    message: `Alat ${device.name} telah berhenti mengirim data sejak 10 menit yang lalu. Harap cek koneksi daya atau WiFi.`
+                    title: 'Sensor Disconnected (Offline)',
+                    message: `Device ${device.name} have stopped sending data since 10 minutes ago. Please check the power or WiFi connection.`
                 });
-                console.log(`⚠️ ALARM OFFLINE TERPICU: ${device.name} baru saja dinyatakan mati.`);
+                console.log(`⚠️ OFFLINE ALARM TRIGGERED: ${device.name} was just declared dead.`);
             }
 
         } catch (error) {
-            console.error('❌ Error pada Cron Job status checker:', error.message);
+            console.error('❌ Error in Cron Job status checker:', error.message);
         }
     });
 };

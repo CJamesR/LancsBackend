@@ -82,7 +82,7 @@ class MQTTHandler {
     try {
       data = JSON.parse(message);
     } catch {
-      console.error('❌ Pesan MQTT bukan JSON valid:', message);
+      console.error('❌MQTT message is not valid JSON:', message);
       return;
     }
     if (topic === 'LancsSK/gateway/register') {
@@ -90,7 +90,7 @@ class MQTTHandler {
     } else if (topic === 'LancsSK/gateway/cmd') {
       console.log('📥 [MQTT IN] Perintah Gateway:', data);
       if (data.cmd === 'pairing_active') {
-        console.log(`🔄 Mode Pairing activated for Gateway: ${data.gateway_mac || 'broadcast'}`);
+        console.log(`🔄 Pairing Mode activated for Gateway: ${data.gateway_mac || 'broadcast'}`);
       }
     } else if (
       topic === 'LancsSK/sensor/data' ||
@@ -122,12 +122,12 @@ async handleGatewayRegister(data) {
       let actualSiteObjectId = null;
 
       if (siteId) {
-        console.log(`🔍 [DEBUG] Mencari Site kustom dengan ID string: ${siteId}...`);
+        console.log(`🔍 [DEBUG] Search for custom Site by string ID: ${siteId}...`);
           const site = await Site.findById(siteId);
           if (site) {
               actualSiteObjectId = site._id;
-              console.log(`✅ [DEBUG] Site ditemukan. Translasi berhasil: ObjectId(${actualSiteObjectId})`);
-              console.log(`🔄 [DEBUG] Menambahkan MAC ${gateway_mac.toUpperCase()} ke daftar devices di Site...`);
+              console.log(`✅ [DEBUG] Site found. Translation successful: ObjectId(${actualSiteObjectId})`);
+              console.log(`🔄 [DEBUG] Adding MAC ${gateway_mac.toUpperCase()} to the devices list in Site...`);
               await Site.findByIdAndUpdate(site._id, { $addToSet: { devices: gateway_mac.toUpperCase() } });
           }
       }
@@ -146,7 +146,7 @@ async handleGatewayRegister(data) {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
-      console.log(`✅ Gateway [${gateway_mac}] terdaftar → User: ${userId}`);
+      console.log(`✅ Gateway [${gateway_mac}] registered → User: ${userId}`);
 
       this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
         status: 'success',
@@ -368,7 +368,7 @@ async handleGatewayRegister(data) {
     if (this.mqttClient && this.mqttClient.connected) {
       this.mqttClient.publish(topic, message);
     } else {
-      console.error('❌ Gagal Publish: MQTT tidak terhubung.');
+      console.error('❌ Failed to Publish: MQTT not connected.');
     }
   }
 
