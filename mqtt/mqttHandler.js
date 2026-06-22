@@ -90,7 +90,7 @@ class MQTTHandler {
     } else if (topic === 'LancsSK/gateway/cmd') {
       console.log('📥 [MQTT IN] Perintah Gateway:', data);
       if (data.cmd === 'pairing_active') {
-        console.log(`🔄 Mode Pairing diaktifkan untuk Gateway: ${data.gateway_mac || 'broadcast'}`);
+        console.log(`🔄 Mode Pairing activated for Gateway: ${data.gateway_mac || 'broadcast'}`);
       }
     } else if (
       topic === 'LancsSK/sensor/data' ||
@@ -117,7 +117,7 @@ async handleGatewayRegister(data) {
       console.log(`🔍 [DEBUG] Memverifikasi JWT Token...`);
       const decoded = jwt.verify(user_token, process.env.JWT_SECRET);
       const userId = decoded.userId;
-      console.log(`✅ [DEBUG] Token Valid. Terjemahan userId: ${userId}`);
+      console.log(`✅ [DEBUG] Token Valid. Translation userId: ${userId}`);
 
       let actualSiteObjectId = null;
 
@@ -150,15 +150,15 @@ async handleGatewayRegister(data) {
 
       this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
         status: 'success',
-        message: 'Gateway terdaftar. Mode 2 aktif.',
+        message: 'Gateway registered. Mode 2 activated.',
         gatewayId: gateway._id.toString()
       }));
 
     } catch (err) {
-      console.error(`❌ Gagal registrasi Gateway [${gateway_mac}]:`, err.message);
+      console.error(`❌ Failed to register Gateway [${gateway_mac}]:`, err.message);
       this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
         status: 'error',
-        message: 'Registrasi gagal. Pastikan token valid atau tidak kedaluwarsa.'
+        message: 'Registration failed. Please ensure the token is valid or not expired.'
       }));
     }
   }
@@ -170,11 +170,11 @@ async handleGatewayRegister(data) {
 
       const { gateID, nodeID, Suhu, Kelembapan, Waktu, Checksum, gps_lat, gps_lon } = data;
       if (!gateID || Suhu === undefined || Kelembapan === undefined) {
-        console.error('❌ Data tidak lengkap: gateID, Suhu, atau Kelembapan kosong.');
+        console.error('❌ Data not complete: gateID, Suhu, atau Kelembapan are empty.');
         return;
       }
       if (parseFloat(Suhu) === -888 || parseFloat(Kelembapan) === -888) {
-        console.warn(`⚠️ [Filter] Sinyal inisialisasi (-888) dari ${gateID} diabaikan.`);
+        console.warn(`⚠️ [Filter] Initialitation Signal (-888) from ${gateID} rejected.`);
         return;
       }
       let waktuUntukDB = new Date();
@@ -196,16 +196,16 @@ async handleGatewayRegister(data) {
           gateID, Suhu, Kelembapan, Waktu
         );
         if (Checksum.toLowerCase() !== expected.toLowerCase()) {
-          console.error(`🚨 [Checksum GAGAL] ${gateID} | diterima: ${Checksum} | diharapkan: ${expected}`);
+          console.error(`🚨 [Checksum FAILED] ${gateID} | diterima: ${Checksum} | diharapkan: ${expected}`);
           this.publish(`LancsSK/ack/${gateID}`, JSON.stringify({
             status: 'error',
-            message: 'Checksum tidak cocok. Data ditolak.'
+            message: 'Checksum not matched. Data rejected.'
           }));
           return;
         }
         console.log(`✅ [Checksum OK] ${gateID}`);
       } else {
-        console.warn(`⚠️ Tidak ada checksum dari ${gateID}, data tetap diproses.`);
+        console.warn(`⚠️ [Checksum] No checksum from ${gateID}, data still processed.`);
       }
 
       // ── Emit real-time ke Flutter via Socket.IO ─────────────────────────
@@ -240,7 +240,7 @@ async handleGatewayRegister(data) {
         Checksum: Checksum || null,
         source: 'mqtt'
       }).save();
-      console.log(`✅ Data tersimpan → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
+      console.log(`✅ Data saved → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
 
       // ── TUGAS 2: Bangun relasi Node → Gateway ──────────────────────────
       // Hanya dijalankan jika nodeID valid (bukan '-' atau kosong)
@@ -264,7 +264,7 @@ async handleGatewayRegister(data) {
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
-        console.log(`🔗 [Relasi] Node ${nodeID} → Gateway ${gateID}${gateway ? ` (${gateway._id})` : ' (gateway belum terdaftar)'}`);
+        console.log(`🔗 [Relasi] Node ${nodeID} → Gateway ${gateID}${gateway ? ` (${gateway._id})` : ' (gateway not yet registered)'}`);
 
         // Alarm suhu per-node
         if (node.siteId) {
@@ -278,7 +278,7 @@ async handleGatewayRegister(data) {
       // ── ACK ke Gateway ──────────────────────────────────────────────────
       this.publish(`LancsSK/ack/${gateID}`, JSON.stringify({
         status: 'success',
-        message: 'Data diterima dan disimpan.'
+        message: 'Data received and saved.'
       }));
 
     } catch (error) {
@@ -299,7 +299,7 @@ async handleGatewayRegister(data) {
     // Update Device lama (backward compatibility untuk statusChecker, siteRoutes, dll)
     let device = await Device.findOne({ serialID: gateID });
     if (!device) {
-      console.log(`✨ Gateway baru di Device lama (${gateID}). Mendaftarkan...`);
+      console.log(`✨ New Gateway in old Device model (${gateID}). Registering...`);
       device = await Device.create({
         serialID: gateID,
         name: `Gateway ${gateID}`,
@@ -332,12 +332,12 @@ async handleGatewayRegister(data) {
 
     if (suhu > maxT) {
       alertType = 'ALERT_HIGH_TEMP';
-      title = 'Peringatan: Suhu Tinggi';
-      message = `Suhu ${suhu}°C melebihi batas maksimum ${maxT}°C.`;
+      title = 'Warning: High Temperature';
+      message = `Temperature ${suhu}°C exceeds the maximum limit ${maxT}°C.`;
     } else if (suhu < minT) {
       alertType = 'ALERT_LOW_TEMP';
-      title = 'Peringatan: Suhu Rendah';
-      message = `Suhu ${suhu}°C di bawah batas minimum ${minT}°C.`;
+      title = 'Warning: Low Temperature';
+      message = `Temperature ${suhu}°C is below the minimum limit ${minT}°C.`;
     }
 
     if (!alertType) return;
@@ -357,7 +357,7 @@ async handleGatewayRegister(data) {
         title,
         message
       });
-      console.log(`⚠️ [Alarm] ${title} pada ${deviceId}`);
+      console.log(`⚠️ [Alarm] ${title} on ${deviceId}`);
     }
   }
 
@@ -400,12 +400,12 @@ async handleGatewayRegister(data) {
   sendGatewayCommand(gatewayMac, cmd, extraPayload = {}) {
     // 1. Validasi Absolut: Cegah pengiriman tanpa arah rute yang spesifik
     if (!gatewayMac) {
-      console.error('❌ [FATAL] Eksekusi dibatalkan: Target MAC Address Gateway tidak terdefinisi (null/kosong).');
+      console.error('❌ [FATAL] Execution cancelled: Target MAC Address Gateway not defined (null/empty).');
       return false;
     }
 
     if (!this.mqttClient || !this.mqttClient.connected) {
-      console.error('❌ Gagal kirim perintah: Peladen Node.js terputus dari broker MQTT.');
+      console.error('❌ Failed to send command: Node.js server disconnected from MQTT broker.');
       return false;
     }
 
@@ -419,7 +419,7 @@ async handleGatewayRegister(data) {
     const targetTopic = `LancsSK/gateway/cmd/${gatewayMac}`;
     
     this.mqttClient.publish(targetTopic, payload, { qos: 1 });
-    console.log(`📤 [MQTT OUT] Transmisi perintah eksekusi '${cmd}' diluncurkan ke: ${targetTopic}`);
+    console.log(`📤 [MQTT OUT] Transmission order from '${cmd}' have been launch to: ${targetTopic}`);
     
     return true;
   }
