@@ -5,7 +5,7 @@ const User = require('../models/userModel');
 const Site = require('../models/siteModel');
 const ActivityLog = require('../models/activityLogModel');
 const PendingInvite = require('../models/pendingInviteModel');
-const Invite = require('../models/inviteModel'); // 🔥 NEW: untuk user yang sudah punya akun
+const Invite = require('../models/inviteModel');
 
 const formatWIB = (date) => {
     if (!date) return null;
@@ -41,33 +41,46 @@ exports.getMySites = async (req, res) => {
             ]
         }).populate('ownerId', 'username email');
 
-        const formattedSites = sites.map(site => {
-            let role = 'member';
-            let isOwner = site.ownerId._id.toString() === userId.toString();
+        const formattedSites = sites
+            .filter(site => {
+                // Guard: skip site yang ownerIdnya null (user sudah dihapus dari DB)
+                if (!site.ownerId) {
+                    console.warn(`⚠️ Site ${site._id} (${site.name}) punya ownerId null — dilewati.`);
+                    return false;
+                }
+                return true;
+            })
+            .map(site => {
+                // Sekarang aman — ownerId sudah pasti ada
+                const isOwner = site.ownerId._id.toString() === userId.toString();
 
-            if (isOwner) {
-                role = 'owner';
-            } else if (site.admins.some(a => a.userId.toString() === userId.toString())) {
-                role = 'admin';
-            } else if (site.members && site.members.some(m => m.userId.toString() === userId.toString())) {
-                role = memberData?.role || 'member';
-            }
+                // Gunakan .find() bukan .some() agar dapat objek member-nya
+                const adminRecord = site.admins.find(a => a.userId?.toString() === userId.toString());
+                const memberRecord = site.members && site.members.find(m => m.userId?.toString() === userId.toString());
 
-            const responseData = {
-                id: site._id,
-                _id: site._id,
-                customSiteId: site.siteId,
-                name: site.name,
-                location: site.location || "Unknown",
-                role: role,
-                ...(role !== 'owner' && { ownerUsername: site.ownerId.username }),
-                deviceCount: site.devices.length,
-                memberCount: (site.members?.length || 0) + site.admins.length + 1,
-                createdAt: formatWIB(site.createdAt)
-            };
+                let role = 'member';
+                if (isOwner) {
+                    role = 'owner';
+                } else if (adminRecord) {
+                    role = 'admin';
+                } else if (memberRecord) {
+                    role = memberRecord.role || 'member';
+                }
 
-            return responseData;
-        });
+                const responseData = {
+                    id: site._id,
+                    _id: site._id,
+                    name: site.name,
+                    location: site.location || "Unknown",
+                    role: role,
+                    ...(role !== 'owner' && { ownerUsername: site.ownerId.username }),
+                    deviceCount: site.devices.length,
+                    memberCount: (site.members?.length || 0) + site.admins.length + 1,
+                    createdAt: formatWIB(site.createdAt)
+                };
+
+                return responseData;
+            });
 
         res.json({ success: true, count: formattedSites.length, data: formattedSites });
     } catch (error) {
@@ -117,7 +130,6 @@ exports.inviteUser = async (req, res) => {
                 return res.status(400).json({ success: false, message: "User already exists in this Site." });
             }
 
-            // Cek apakah sudah ada invite pending ke user ini untuk site yang sama
             const existingInvite = await Invite.findOne({
                 siteId: siteId,
                 recipientEmail: email.toLowerCase(),
@@ -136,7 +148,6 @@ exports.inviteUser = async (req, res) => {
                 status: 'pending'
             });
 
-            // Catat Aktivitas
             await ActivityLog.create({
                 userId: inviterId,
                 siteId: siteId,
@@ -150,7 +161,7 @@ exports.inviteUser = async (req, res) => {
                         token: targetUser.fcmToken,
                         notification: {
                             title: "Undangan Site 📩",
-                            body: `${inviter?.username || 'Someone'} invte you to join "${site.name}". Open the Application to accept or decline .`
+                            body: `${inviter?.username || 'Someone'} invited you to join "${site.name}". Open the Application to accept or decline.`
                         },
                         data: {
                             type: "invite",
@@ -159,7 +170,7 @@ exports.inviteUser = async (req, res) => {
                             siteName: site.name
                         }
                     });
-                    console.log(`✅ Notification Push send successfully to ${targetUser.email}`);
+                    console.log(`✅ Notification Push sent successfully to ${targetUser.email}`);
                 } catch (fcmErr) {
                     console.error("⚠️ Gagal kirim FCM:", fcmErr.message);
                 }
@@ -168,7 +179,7 @@ exports.inviteUser = async (req, res) => {
             // 📧 Kirim Email Notifikasi (fallback / tambahan)
             try {
                 await transporter.sendMail({
-                    from: `"Lancs IoT" <${process.env.EMAIL_USER}>`,
+                    from: `"Lancs IoT" <${process.env.SMTP_USER}>`,
                     to: targetUser.email,
                     subject: `Undangan Bergabung ke Site ${site.name}`,
                     html: `
@@ -180,10 +191,11 @@ exports.inviteUser = async (req, res) => {
                     `
                 });
             } catch (emailErr) {
+                // ⚠️ Email gagal tapi invite tetap berhasil dibuat — jangan gagalkan response
                 console.error("⚠️ Failed to send email notification:", emailErr.message);
             }
 
-            return res.status(200).json({ success: true, message: `Undangan berhasil dikirim ke ${targetUser.username}. Menunggu konfirmasi dari mereka.` });
+            return res.status(200).json({ success: true, message: `Invite berhasil dikirim ke ${targetUser.username}. Menunggu konfirmasi dari mereka.` });
 
         } else {
             // ============================================================
@@ -205,17 +217,22 @@ exports.inviteUser = async (req, res) => {
             });
 
             const mailOptions = {
-                from: `"Lancs IoT" <${process.env.EMAIL_USER}>`,
+                from: `"Lancs IoT" <${process.env.SMTP_USER}>`,
                 to: email,
                 subject: `Undangan Bergabung ke Site ${site.name}`,
                 html: `<p>Klik link ini untuk mendaftar dan bergabung: <a href="${inviteLink}">Daftar & Bergabung</a></p>`
             };
 
-            if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+            try {
                 await transporter.sendMail(mailOptions);
                 return res.status(200).json({ success: true, message: `Registration invite has been sent to ${email}` });
-            } else {
-                return res.status(500).json({ success: false, message: "Email system not configured, invite failed." });
+            } catch (emailErr) {
+                console.error("⚠️ Failed to send registration email:", emailErr.message);
+                // Invite tetap tersimpan di DB meski email gagal
+                return res.status(200).json({ 
+                    success: true, 
+                    message: `Invite saved but email could not be sent to ${email}. Check SMTP configuration.`
+                });
             }
         }
     } catch (error) {
@@ -329,7 +346,6 @@ exports.removeMember = async (req, res) => {
         const site = await Site.findById(siteId);
         if (!site) return res.status(404).json({ success: false, message: "Site tidak ditemukan." });
 
-        // Validasi Izin: Hanya Owner atau Admin yang boleh mengeluarkan Member
         const isOwner = site.ownerId.toString() === removerId.toString();
         const isAdmin = site.admins.some(a => a.userId.toString() === removerId.toString());
 
@@ -337,17 +353,14 @@ exports.removeMember = async (req, res) => {
             return res.status(403).json({ success: false, message: "Akses ditolak. Anda bukan Owner/Admin." });
         }
 
-        // Cari index member yang akan dihapus
         const memberIndex = site.members.findIndex(m => m.userId.toString() === memberId.toString());
         if (memberIndex === -1) {
             return res.status(404).json({ success: false, message: "Member tidak ditemukan di Site ini." });
         }
 
-        // Eksekusi penghapusan
         site.members.splice(memberIndex, 1);
         await site.save();
 
-        // Log Aktivitas
         await ActivityLog.create({
             userId: removerId,
             siteId: siteId,
@@ -373,7 +386,6 @@ exports.removeAdmin = async (req, res) => {
         const site = await Site.findById(siteId);
         if (!site) return res.status(404).json({ success: false, message: "Site not found." });
 
-        // Double-check: hanya owner yang boleh hapus admin
         if (site.ownerId.toString() !== removerId.toString()) {
             return res.status(403).json({
                 success: false,
@@ -381,7 +393,6 @@ exports.removeAdmin = async (req, res) => {
             });
         }
 
-        // Pastikan target bukan owner itu sendiri
         if (site.ownerId.toString() === adminId.toString()) {
             return res.status(400).json({ success: false, message: "Owner cannot be removed from the Site." });
         }
