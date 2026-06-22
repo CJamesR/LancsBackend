@@ -50,7 +50,6 @@ exports.getMySites = async (req, res) => {
             } else if (site.admins.some(a => a.userId.toString() === userId.toString())) {
                 role = 'admin';
             } else if (site.members && site.members.some(m => m.userId.toString() === userId.toString())) {
-                const memberData = site.members.find(m => m.userId.toString() === userId.toString());
                 role = memberData.role;
             }
 
@@ -290,7 +289,7 @@ exports.getSiteMembers = async (req, res) => {
                 id: m.userId._id,
                 username: m.userId.username,
                 email: m.userId.email,
-                role: m.role,
+                role: "member",
                 lastOnline: formatWIB(m.userId.lastOnline),
                 activities: activities
             };

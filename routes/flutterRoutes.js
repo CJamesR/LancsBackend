@@ -56,7 +56,7 @@ router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
         if (isOwner) {
             allowedGateways = site.devices; 
         } else if (adminRecord) {
-            allowedGateways = adminRecord.allowedDevices; 
+            allowedGateways = site.devices; 
         } else if (memberRecord) {
             // Member bisa melihat semua perangkat di dalam site
             allowedGateways = site.devices; 

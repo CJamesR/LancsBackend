@@ -67,9 +67,9 @@ exports.addSensorData = async (req, res) => {
     const newSensor = new SensorModel(sensorData);
     const saved = await newSensor.save();
 
-    console.log(`✅ Data saved to collection: sensor_${ServerID}`);
+    console.log(`✅ Data saved to collection: sensor_${gateID}`);
 
-    const device = await Device.findOne({ serialID: ServerID });
+    const device = await Device.findOne({ serialID: gateID });
 
     if (device) {
       // 1. UPDATE STATUS (BERLAKU UNTUK SEMUA ALAT: Diklaim maupun Belum)
@@ -98,19 +98,19 @@ exports.addSensorData = async (req, res) => {
         if (alertType) {
           const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
           const recentSpamCheck = await Notification.findOne({
-            deviceId: ServerID,
+            deviceId: gateID,
             type: alertType,
             createdAt: { $gte: fifteenMinutesAgo }
           });
           if (!recentSpamCheck) {
             await Notification.create({
               siteId: device.siteId,
-              deviceId: ServerID,
+              deviceId: gateID,
               type: alertType,
               title: title,
               message: message
             });
-            console.log(`⚠️ ALARM HTTP TERPICU: ${title} pada ${device.name || ServerID}`);
+            console.log(`⚠️ ALARM HTTP TERPICU: ${title} pada ${device.name || gateID}`);
           }
         }
       }
@@ -119,7 +119,7 @@ exports.addSensorData = async (req, res) => {
     // Publish to MQTT if needed (for real-time updates)
     if (global.mqttHandler && global.mqttHandler.connected) {
       const mqtt = require('../mqtt/mqttHandler');
-      mqtt.sendCommand(ServerID, {
+      mqtt.sendCommand(gateID, {
         type: 'data_received',
         data: sensorData
       });
@@ -127,7 +127,7 @@ exports.addSensorData = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: `Data berhasil disimpan ke sensor_${ServerID}`,
+      message: `Data berhasil disimpan ke sensor_${gateID}`,
       data: {
         ...saved._doc,
         Waktu: recordTime.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }) 
@@ -268,7 +268,7 @@ exports.getLatestSensorData = async (req, res) => {
     const response = {
       success: true,
       data: {
-        sensorId: latestData.ServerID,
+        sensorId: latestData.gateID,
         temperature: latestData.Suhu,
         humidity: latestData.Kelembapan,
         timestamp: latestData.Waktu,
@@ -335,7 +335,7 @@ exports.getLatestSensorDataPublic = async (req, res) => {
     const response = {
       success: true,
       data: {
-        sensorId: latestData.ServerID,
+        sensorId: latestData.gateID,
         temperature: latestData.Suhu,
         humidity: latestData.Kelembapan,
         timestamp: latestData.Waktu,
