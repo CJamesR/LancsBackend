@@ -17,7 +17,7 @@ const nodeSchema = new mongoose.Schema({
 
     // MAC Address node — identifier hardware, unik per unit fisik
     // Ini yang disebut RealID di payload MQTT
-    serialId: {
+    nodeID: {
         type: String,
         required: true,
         unique: true,
@@ -26,7 +26,7 @@ const nodeSchema = new mongoose.Schema({
     },
 
     // Gateway induk — diisi saat data pertama kali masuk dari gateway tersebut
-    gatewayId: {
+    gateID: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Gateway',
         default: null,
