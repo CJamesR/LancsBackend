@@ -16,7 +16,7 @@ const siteController = require('../controllers/siteController');
 const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 
 // =========================================================================
-// 🛠️ FUNGSI HELPER (KOMPAK & ANTI-CRASH)
+// 🛠️ FUNGSI HELPER
 // =========================================================================
 const extractUserId = (req) => {
     const id = req.user?._id ?? req.user?.userId ?? req.user?.id;
@@ -28,35 +28,54 @@ const isOnline = (date, maxMinutes = 5) => {
     return date && (new Date() - new Date(date)) <= maxMinutes * 60000;
 };
 
-// Fungsi sakti untuk merakit Gateway beserta Node di dalamnya
+// Merakit data Gateway beserta Node anaknya.
+//
+// CATATAN ARSITEKTUR:
+// - Node.gateID bertipe ObjectId (ref ke Gateway._id) — diisi oleh mqttHandler
+//   saat data MQTT masuk pertama kali dari node tersebut.
+// - Pencarian node menggunakan gwIds (ObjectId), bukan MAC string, karena
+//   tipe data di schema adalah ObjectId.
+// - site.devices bisa berisi MAC Gateway BARU (ada di Gateway model) maupun
+//   serialID Device LAMA (ada di Device model). Query Gateway menggunakan $in
+//   untuk mendukung keduanya — Device lama tidak punya dokumen di Gateway
+//   sehingga tidak muncul di list ini (by design, migrasi bertahap).
 const buildGatewayWithNodes = async (gateways) => {
+    if (!gateways || gateways.length === 0) {
+        console.log('  [buildGatewayWithNodes] Input kosong — return []');
+        return [];
+    }
+
     const gwIds = gateways.map(g => g._id);
-    
-    // Pencarian ganda untuk kompabilitas model lama & baru
-    const nodes = await Node.find({ 
-        $or: [{ gateID: { $in: gwIds } }, { gatewayId: { $in: gwIds } }] 
-    }).lean();
+    console.log(`  [buildGatewayWithNodes] Query nodes untuk ${gateways.length} gateway(s):`, gwIds.map(id => id.toString()));
+
+    // gateID di Node adalah ObjectId → cari berdasarkan _id saja
+    const nodes = await Node.find({ gateID: { $in: gwIds } }).lean();
+    console.log(`  [buildGatewayWithNodes] Node ditemukan: ${nodes.length}`);
+    if (nodes.length > 0) {
+        nodes.forEach(n => console.log(`    ↳ Node ${n.nodeID} | gateID: ${n.gateID}`));
+    }
 
     return gateways.map(gw => {
-        const childNodes = nodes.filter(n =>
-            n.gateID?.toString() === gw._id.toString() || 
-            n.gatewayId?.toString() === gw._id.toString()
-        ).map(n => ({
-            id: n._id,
-            serialId: n.nodeID || n.serialId || "-",
-            name: n.name || n.nodeID || n.serialId || "Sensor",
-            temperature: n.lastTemperature,
-            humidity: n.lastHumidity,
-            lastUpdate: n.lastSeen,
-            status: isOnline(n.lastSeen, 10) ? 'online' : 'offline'
-        }));
+        const childNodes = nodes
+            .filter(n => n.gateID?.toString() === gw._id.toString())
+            .map(n => ({
+                id: n._id,
+                serialId: n.nodeID || "-",
+                name: n.name || n.nodeID || "Sensor",
+                temperature: n.lastTemperature,
+                humidity: n.lastHumidity,
+                lastUpdate: n.lastSeen,
+                status: isOnline(n.lastSeen, 10) ? 'online' : 'offline'
+            }));
+
+        console.log(`  [buildGatewayWithNodes] Gateway ${gw.mac} → ${childNodes.length} node(s)`);
 
         return {
             id: gw._id,
             mac: gw.mac,
             name: gw.name || gw.mac,
             status: isOnline(gw.lastSeen, 5) ? 'online' : 'offline',
-            nodes: childNodes // 🎯 Permintaan Anda: Node tersambung ada di dalam Gateway
+            nodes: childNodes
         };
     });
 };
@@ -64,41 +83,73 @@ const buildGatewayWithNodes = async (gateways) => {
 const apiLimiter = rateLimiter({ windowMs: 60 * 1000, max: 20, message: { success: false, message: 'Too many requests.' }});
 
 // =========================================================================
-// 1. DASHBOARD & GATEWAY FETCHING (Disederhanakan menjadi 3 Rute Pendek)
+// 1. DASHBOARD & GATEWAY FETCHING
 // =========================================================================
-router.get('/sites/:siteId/dashboard', apiLimiter, async (req, res) => {
+
+router.get('/sites/:siteId/dashboard', protect, apiLimiter, async (req, res) => {
     try {
         const userId = extractUserId(req);
-        const site = await Site.findById(req.params.siteId).populate('ownerId', 'username');
-        if (!site) return res.status(404).json({ success: false, message: 'Site not found' });
+        const siteId = req.params.siteId;
+        console.log(`\n📊 [DASHBOARD] Request siteId=${siteId} oleh userId=${userId}`);
+
+        const site = await Site.findById(siteId).populate('ownerId', 'username');
+        if (!site) {
+            console.log('  [DASHBOARD] ❌ Site tidak ditemukan');
+            return res.status(404).json({ success: false, message: 'Site not found' });
+        }
+        console.log(`  [DASHBOARD] ✅ Site ditemukan: "${site.name}" | devices: [${site.devices.join(', ')}]`);
 
         const isOwner = site.ownerId._id.toString() === userId;
-        const role = isOwner ? 'owner' : (site.admins.some(a => a.userId.toString() === userId) ? 'admin' : 'member');
+        const role = isOwner
+            ? 'owner'
+            : (site.admins.some(a => a.userId.toString() === userId) ? 'admin' : 'member');
+        console.log(`  [DASHBOARD] Role user ini: ${role}`);
 
-        const gateways = await Gateway.find({ mac: { $in: site.devices.map(d => d.toUpperCase()) } }).lean();
-        
+        const upperDevices = site.devices.map(d => d.toUpperCase());
+        console.log(`  [DASHBOARD] Mencari Gateway dengan MAC in: [${upperDevices.join(', ')}]`);
+        const gateways = await Gateway.find({ mac: { $in: upperDevices } }).lean();
+        console.log(`  [DASHBOARD] Gateway ditemukan di DB: ${gateways.length}`);
+        if (gateways.length > 0) {
+            gateways.forEach(gw => console.log(`    ↳ ${gw.mac} | _id: ${gw._id} | lastSeen: ${gw.lastSeen}`));
+        } else {
+            console.log('  [DASHBOARD] ⚠️  Tidak ada Gateway yang cocok. Kemungkinan devices di Site berisi serialID Device lama, bukan MAC Gateway baru.');
+        }
+
+        const builtData = await buildGatewayWithNodes(gateways);
+        console.log(`  [DASHBOARD] ✅ Response dikirim. Total gateway dalam response: ${builtData.length}\n`);
+
         res.json({
-            success: true, 
-            siteName: site.name, 
-            ownerName: isOwner ? "Anda" : site.ownerId.username, 
-            role, 
-            data: await buildGatewayWithNodes(gateways) // Langsung rakit JSON lengkap
+            success: true,
+            siteName: site.name,
+            ownerName: isOwner ? "Anda" : site.ownerId.username,
+            role,
+            data: builtData
         });
-    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+    } catch (error) {
+        console.error("❌ [DASHBOARD] Error:", error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 router.get('/gateways', protect, async (req, res) => {
     try {
-        const gateways = await Gateway.find({ ownerId: extractUserId(req) }).lean();
+        const userId = extractUserId(req);
+        console.log(`\n📋 [GATEWAYS] Request oleh userId=${userId}`);
+        const gateways = await Gateway.find({ ownerId: userId }).lean();
+        console.log(`  [GATEWAYS] Ditemukan: ${gateways.length} gateway(s)`);
         res.json({ success: true, data: await buildGatewayWithNodes(gateways) });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
 router.get('/gateway/:mac/nodes', protect, async (req, res) => {
     try {
-        const gateway = await Gateway.findOne({ mac: req.params.mac.toUpperCase() }).lean();
-        if (!gateway) return res.status(404).json({ success: false, message: 'Gateway not found.' });
-
+        const mac = req.params.mac.toUpperCase();
+        console.log(`\n🔌 [GATEWAY NODES] Request MAC=${mac}`);
+        const gateway = await Gateway.findOne({ mac }).lean();
+        if (!gateway) {
+            console.log(`  [GATEWAY NODES] ❌ Gateway tidak ditemukan`);
+            return res.status(404).json({ success: false, message: 'Gateway not found.' });
+        }
         const data = await buildGatewayWithNodes([gateway]);
         res.json({ success: true, gatewayMac: gateway.mac, count: data[0].nodes.length, nodes: data[0].nodes });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -110,38 +161,51 @@ router.get('/gateway/:mac/nodes', protect, async (req, res) => {
 router.get('/node/:serialId/detail', protect, async (req, res) => {
     try {
         const searchId = req.params.serialId.toUpperCase();
-        const node = await Node.findOne({ $or: [{nodeID: searchId}, {serialId: searchId}] }).populate('gateID gatewayId').lean();
+        const node = await Node.findOne({ nodeID: searchId }).populate('gateID').lean();
         if (!node) return res.status(404).json({ success: false, message: 'Node not found.' });
 
-        const gateway = node.gateID || node.gatewayId;
-        if (!gateway) return res.status(400).json({ success: false, message: 'Node is orphaned.' });
+        const gateway = node.gateID;
+        if (!gateway) return res.status(400).json({ success: false, message: 'Node is orphaned (no gateway).' });
 
         const SensorModel = getSensorModel(gateway.mac);
-        const historyData = await SensorModel.find({ gateID: gateway.mac, $or: [{nodeID: searchId}, {serialId: searchId}], Waktu: { $gte: new Date(Date.now() - 86400000) } })
-            .sort({ Waktu: 1 }).select('Suhu Kelembapan Waktu gps_lat gps_lon -_id').lean();
+        const historyData = await SensorModel.find({
+            gateID: gateway.mac,
+            nodeID: searchId,
+            Waktu: { $gte: new Date(Date.now() - 86400000) }
+        }).sort({ Waktu: 1 }).select('Suhu Kelembapan Waktu gps_lat gps_lon -_id').lean();
 
         res.json({
             success: true,
             data: {
-                serialId: node.nodeID || node.serialId,
-                name: node.name || node.nodeID || node.serialId,
+                serialId: node.nodeID,
+                name: node.name || node.nodeID,
                 gatewayMac: gateway.mac,
                 status: isOnline(node.lastSeen, 10) ? 'online' : 'offline',
                 currentTemperature: node.lastTemperature,
                 currentHumidity: node.lastHumidity,
-                history24h: historyData.map(d => ({ temperature: d.Suhu, humidity: d.Kelembapan, timestamp: d.Waktu, latitude: d.gps_lat, longitude: d.gps_lon }))
+                history24h: historyData.map(d => ({
+                    temperature: d.Suhu,
+                    humidity: d.Kelembapan,
+                    timestamp: d.Waktu,
+                    latitude: d.gps_lat,
+                    longitude: d.gps_lon
+                }))
             }
         });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
 // =========================================================================
-// 3. PENGUBAH NAMA (RENAME) - DIBUAT DINAMIS
+// 3. RENAME
 // =========================================================================
 const renameHandler = (Model, searchField) => async (req, res) => {
     try {
         if (!req.body.newName) return res.status(400).json({ success: false, message: 'New name required.' });
-        const doc = await Model.findOneAndUpdate({ [searchField]: req.params.id.toUpperCase() }, { name: req.body.newName.trim() }, { new: true });
+        const doc = await Model.findOneAndUpdate(
+            { [searchField]: req.params.id.toUpperCase() },
+            { name: req.body.newName.trim() },
+            { new: true }
+        );
         if (!doc) return res.status(404).json({ success: false, message: 'Not found.' });
         res.json({ success: true, message: 'Renamed successfully', data: { id: req.params.id, name: doc.name } });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
@@ -152,17 +216,22 @@ router.patch('/device/:id/rename', protect, apiLimiter, renameHandler(Device, 's
 router.patch('/node/:id/rename', protect, apiLimiter, async (req, res) => {
     try {
         const { newName } = req.body;
-        const searchId = req.params.id.toUpperCase();
-        if (!newName) return res.status(400).json({ success: false });
-        const node = await Node.findOneAndUpdate({ $or: [{nodeID: searchId}, {serialId: searchId}] }, { name: newName.trim() }, { new: true });
-        res.json({ success: !!node, data: { name: node.name } });
+        if (!newName) return res.status(400).json({ success: false, message: 'New name required.' });
+        const node = await Node.findOneAndUpdate(
+            { nodeID: req.params.id.toUpperCase() },
+            { name: newName.trim() },
+            { new: true }
+        );
+        if (!node) return res.status(404).json({ success: false, message: 'Node not found.' });
+        res.json({ success: true, data: { name: node.name } });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
 // =========================================================================
 // 4. KONTROL HARDWARE (MQTT COMMANDS)
 // =========================================================================
-const logActivity = async (req, siteId, actionText) => ActivityLog.create({ userId: extractUserId(req), siteId, action: actionText });
+const logActivity = async (req, siteId, actionText) =>
+    ActivityLog.create({ userId: extractUserId(req), siteId, action: actionText });
 
 router.post('/sites/:siteId/gateways/:mac/pairing', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
@@ -175,16 +244,20 @@ router.post('/sites/:siteId/gateways/:mac/pairing', protect, checkSiteRole(['own
 
 router.post('/sites/:siteId/gateways/:mac/command', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
-        if (!['pairing_active', 'set_wifi'].includes(req.body.command)) return res.status(400).json({ success: false, message: 'Invalid command' });
+        if (!['pairing_active', 'set_wifi'].includes(req.body.command))
+            return res.status(400).json({ success: false, message: 'Invalid command' });
         mqttHandler.sendGatewayCommand(req.params.mac.toUpperCase(), req.body.command);
         await logActivity(req, req.params.siteId, `Sent command '${req.body.command}' to gateway ${req.params.mac}`);
-        res.json({ success: true, message: `Command sent.` });
+        res.json({ success: true, message: 'Command sent.' });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
 router.post('/gateway/:mac/set-wifi', protect, async (req, res) => {
     try {
-        mqttHandler.sendGatewayCommand(req.params.mac.toUpperCase(), 'set_wifi', { ssid: req.body.ssid, password: req.body.password });
+        mqttHandler.sendGatewayCommand(req.params.mac.toUpperCase(), 'set_wifi', {
+            ssid: req.body.ssid,
+            password: req.body.password
+        });
         res.json({ success: true, message: 'WiFi settings pushed via MQTT.' });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -192,14 +265,17 @@ router.post('/gateway/:mac/set-wifi', protect, async (req, res) => {
 // =========================================================================
 // 5. MANAJEMEN ANGGOTA & UNDANGAN SITE
 // =========================================================================
-router.post('/sites/:siteId/invite', checkSiteRole(['owner', 'admin']), siteController.inviteUser);
+router.post('/sites/:siteId/invite', protect, checkSiteRole(['owner', 'admin']), siteController.inviteUser);
 router.delete('/sites/:siteId/members/:memberId', protect, siteController.removeMember);
 router.delete('/sites/:siteId/admins/:adminId', protect, checkSiteRole(['owner']), siteController.removeAdmin);
 
 router.get('/invites/pending', protect, async (req, res) => {
     try {
         const user = await User.findById(extractUserId(req));
-        const invites = await Invite.find({ recipientEmail: user.email.toLowerCase(), status: 'pending' }).sort({ createdAt: -1 });
+        const invites = await Invite.find({
+            recipientEmail: user.email.toLowerCase(),
+            status: 'pending'
+        }).sort({ createdAt: -1 });
         res.json({ success: true, count: invites.length, invites });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -207,7 +283,8 @@ router.get('/invites/pending', protect, async (req, res) => {
 router.post('/invites/:inviteId/respond', protect, async (req, res) => {
     try {
         const invite = await Invite.findById(req.params.inviteId);
-        if (!invite || invite.status !== 'pending') return res.status(404).json({ success: false });
+        if (!invite || invite.status !== 'pending')
+            return res.status(404).json({ success: false, message: 'Invite not found or already responded.' });
 
         if (req.body.action === 'decline') {
             await Invite.findByIdAndDelete(invite._id);
@@ -216,8 +293,13 @@ router.post('/invites/:inviteId/respond', protect, async (req, res) => {
 
         const site = await Site.findById(invite.siteId);
         if (site) {
-            if (invite.role === 'admin') site.admins.push({ userId: extractUserId(req), allowedDevices: [] });
-            else { site.members = site.members || []; site.members.push({ userId: extractUserId(req), role: 'member' }); }
+            const userId = extractUserId(req);
+            if (invite.role === 'admin') {
+                site.admins.push({ userId, allowedDevices: [] });
+            } else {
+                site.members = site.members || [];
+                site.members.push({ userId, role: 'member' });
+            }
             await site.save();
             await logActivity(req, site._id, `Accepted invite and joined as ${invite.role}`);
         }
@@ -230,12 +312,14 @@ router.delete('/sites/:siteId/leave', protect, async (req, res) => {
     try {
         const userId = extractUserId(req);
         const site = await Site.findById(req.params.siteId);
-        if (site.ownerId.toString() === userId) return res.status(400).json({ success: false, message: 'Owner cannot leave.' });
+        if (!site) return res.status(404).json({ success: false, message: 'Site not found.' });
+        if (site.ownerId.toString() === userId)
+            return res.status(400).json({ success: false, message: 'Owner cannot leave.' });
 
         site.admins = site.admins.filter(a => a.userId.toString() !== userId);
         site.members = (site.members || []).filter(m => m.userId.toString() !== userId);
         await site.save();
-        await logActivity(req, site._id, `Left the site`);
+        await logActivity(req, site._id, 'Left the site');
         res.json({ success: true, message: 'Successfully left.' });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -252,15 +336,40 @@ router.patch('/user/fcm-token', protect, async (req, res) => {
 
 router.post('/gateways/register', async (req, res) => {
     try {
-        if (!req.body.serialId || !req.body.user_token) return res.status(400).json({ success: false });
+        if (!req.body.serialId || !req.body.user_token)
+            return res.status(400).json({ success: false, message: 'serialId and user_token required.' });
+
         const decoded = require('jsonwebtoken').verify(req.body.user_token, process.env.JWT_SECRET);
+
+        let actualSiteObjectId = null;
+        if (req.body.siteId) {
+            const site = await Site.findById(req.body.siteId);
+            if (site) {
+                actualSiteObjectId = site._id;
+                await Site.findByIdAndUpdate(site._id, {
+                    $addToSet: { devices: req.body.serialId.toUpperCase() }
+                });
+            }
+        }
+
         const gateway = await Gateway.findOneAndUpdate(
             { mac: req.body.serialId.toUpperCase() },
-            { $set: { mac: req.body.serialId.toUpperCase(), ownerId: decoded.userId, isOnline: true, lastSeen: new Date() } },
+            {
+                $set: {
+                    mac: req.body.serialId.toUpperCase(),
+                    ownerId: decoded.userId,
+                    ...(actualSiteObjectId && { siteId: actualSiteObjectId }),
+                    isOnline: true,
+                    lastSeen: new Date()
+                }
+            },
             { upsert: true, new: true }
         );
         res.json({ success: true, data: gateway });
-    } catch (error) { res.status(500).json({ success: false }); }
+    } catch (error) {
+        console.error("❌ Error register gateway:", error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 module.exports = router;
