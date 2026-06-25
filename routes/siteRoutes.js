@@ -8,7 +8,7 @@ const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 
 const extractUserId = (req) => {
     const raw = req.user?._id ?? req.user?.userId ?? req.user?.id;
-    if (!raw) throw new Error("User ID tidak ditemukan di token JWT.");
+    if (!raw) throw new Error("User ID not found in JWT token.");
     return raw.toString();
 };
 
