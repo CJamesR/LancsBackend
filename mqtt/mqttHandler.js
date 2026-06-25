@@ -250,10 +250,10 @@ async handleGatewayRegister(data) {
 
         // UPSERT Node — jika node ini baru, daftarkan otomatis
         const node = await Node.findOneAndUpdate(
-          { serialId: nodeID.toUpperCase() },
+          { nodeID: nodeID.toUpperCase() },
           {
             $set: {
-              gatewayId: gateway ? gateway._id : null,
+              gateID: gateway ? gateway._id : null,
               siteId: gateway ? gateway.siteId : null,
               isOnline: true,
               lastSeen: new Date(),
