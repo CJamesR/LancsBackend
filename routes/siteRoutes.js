@@ -230,4 +230,12 @@ router.delete(
     checkSiteRole(['owner']),
     siteController.removeAdmin
 );
+
+router.get(
+    '/:siteId/nodes', 
+    protect, 
+    checkSiteRole(['owner', 'admin', 'member']), 
+    siteController.getSiteNodes
+);
+
 module.exports = router;

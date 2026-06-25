@@ -6,6 +6,7 @@ const Site = require('../models/siteModel');
 const ActivityLog = require('../models/activityLogModel');
 const PendingInvite = require('../models/pendingInviteModel');
 const Invite = require('../models/inviteModel');
+const Node = require('../models/nodeModel');
 
 const formatWIB = (date) => {
     if (!date) return null;
@@ -424,3 +425,28 @@ exports.removeAdmin = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+
+exports.getSiteNodes = async (req, res) => {
+    try {
+        const {siteId} = req.params;
+        const {gateID} = req.query;
+        let query = { siteId: siteId };
+
+        if (gateID) {
+            query.$or = [
+                {gateID: gateID},
+                {gateID: null}
+            ];
+        }
+        const nodes = await Node.find(query).populate('gateID', 'name mac isOnline currentMode').sort({createdAt: -1});
+
+        res.json({
+            success: true,
+            count: nodes.length,
+            data: nodes
+        });
+    } catch (error) {
+        console.error("❌ Error Get Site Nodes:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+}
