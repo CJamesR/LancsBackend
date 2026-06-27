@@ -6,6 +6,7 @@ const Gateway    = require('../models/gatewayModel'); // model baru
 const Node       = require('../models/nodeModel');    // model baru
 const Notification = require('../models/notificationModel');
 const Site       = require('../models/siteModel');   // untuk auto-assign gateway ke site saat registrasi
+const Transaction = require('../models/transactionModel'); // untuk menyimpan transaksi pairing aktif
 
 class MQTTHandler {
   constructor() {
@@ -86,7 +87,11 @@ class MQTTHandler {
       return;
     }
     if (topic === 'LancsSK/gateway/register') {
-      await this.handleGatewayRegister(data);
+      if (data.status === 'deleted_gw' || data.status ==='deleted_node'){
+        await this.handleTeardownAck(data);
+      } else {
+        await this.handleGatewayRegister(data);
+      }
     } else if (topic === 'LancsSK/gateway/cmd') {
       console.log('📥 [MQTT IN] Perintah Gateway:', data);
       if (data.cmd === 'pairing_active') {
@@ -160,6 +165,42 @@ async handleGatewayRegister(data) {
         status: 'error',
         message: 'Registration failed. Please ensure the token is valid or not expired.'
       }));
+    }
+  }
+
+  async handleTeardownAck(data) {
+    const { status, req_id } = data;
+    console.log(`\n📥 [MQTT IN] Konfirmasi Teardown Diterima: ${status} | ReqID: ${req_id}`);
+
+    try {
+      // 1. Cari transaksi yang diinisiasi oleh pengguna Flutter
+      const trx = await Transaction.findOne({ req_id });
+      if (!trx || trx.status !== 'pending') return;
+
+      // 2. Eksekusi Hapus Gateway
+      if (status === 'deleted_gw' && trx.type === 'gateway') {
+        const gateway = await Gateway.findOneAndDelete({ mac: trx.target_mac });
+        if (gateway) {
+          // Bersihkan semua Node terkait
+          await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
+          // Bersihkan dari Site
+          if (gateway.siteId) {
+            await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: trx.target_mac } });
+          }
+        }
+      } 
+      // 3. Eksekusi Hapus Node Saja
+      else if (status === 'deleted_node' && trx.type === 'node') {
+        await Node.findOneAndDelete({ $or: [{ nodeID: trx.target_mac }, { serialId: trx.target_mac }] });
+      }
+
+      // 4. Ubah status transaksi agar Flutter tahu proses telah selesai
+      trx.status = 'completed';
+      await trx.save();
+      console.log(`✅ [TEARDOWN] Perangkat ${trx.target_mac} sukses dihapus dari Database.`);
+      
+    } catch (error) {
+      console.error('❌ Error saat memproses Teardown ACK:', error.message);
     }
   }
 

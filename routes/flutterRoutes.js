@@ -14,6 +14,7 @@ const User = require('../models/userModel');
 const mqttHandler = require('../mqtt/mqttHandler');
 const siteController = require('../controllers/siteController');
 const { protect, checkSiteRole } = require('../middleware/authMiddleware');
+const Transaction = require('../models/transactionModel');
 
 // =========================================================================
 // 🛠️ FUNGSI HELPER
@@ -369,6 +370,69 @@ router.post('/gateways/register', async (req, res) => {
     } catch (error) {
         console.error("❌ Error register gateway:", error.message);
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.get('/devices/teardown_status/:reqId', protect, async (req, res) => {
+    try {
+        const trx = await Transaction.findOne({ req_id: req.params.reqId });
+        if (!trx) return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
+        
+        res.json({ status: trx.status });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.delete('/gateway/:mac/delete', protect, apiLimiter, async (req, res) => {
+    try {
+        const targetMac = req.params.mac.toUpperCase();
+        const isForceDelete = req.query.force === 'true';
+
+        if (!isForceDelete) {
+            const gateway = await Gateway.findOneAndDelete({ mac: targetMac });
+            if (gateway) {
+                await Node.deleteMany({ $or: [{ gateID: gateway._id}, {gatewayId: gateway._id}] });
+                if (gateway.siteId) {
+                    await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: targetMac } });
+                }
+            }
+            return res.status(200).json({success: true, message: 'Force delete successful'});
+        }
+        const req_id = crypto.randomUUID();
+        await Transaction.create({ req_id, target_mac: targetMac, type: 'gateway', status: 'pending' });
+
+        mqttHandler.sendGatewayCommand(targetMac, 'delete_gateway', { req_id });
+
+        res.status(202).json({status: 'processing', req_id});
+    } catch (error) {
+        res.status(500).json({success: false, error: error.message}); 
+    }
+});
+
+router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) => {
+    try {
+        const targetMac = req.params.serialId.toUpperCase();
+        const isForceDelete = req.query.force === 'true';
+
+        const node = await Node.findOne({$or: [{ nodeID: targetMac }, { serialID: targetMac }]}).populate('gateID gatewayId');
+
+        if (isForceDelete) {
+            await Node.findOneAndDelete({$or: [{ nodeID: targetMac }, {serialID: targetMac }]});
+            return res.status(200).json({success: true, message: 'Force delete successful'});
+        }
+        if (!node) return res.status(404).json({success: false, message: 'Node not found'});
+
+        const gateway = node.gateID || node.gatewayId;
+        if (!gateway) return res.status(400).json({success: false, message: 'Node is orphaned, use force delete'});
+
+        const req_id = crypto.randomUUID();
+        await Transaction.create({ req_id, target_mac: targetMac, type: 'node', status: 'pending' });
+
+        mqttHandler.sendGatewayCommand(gateway.mac, 'delete_node', { req_id, node_serial: targetMac });
+        res.status(202).json({status: 'processing', req_id});
+    } catch (error) {
+        res.status(500).json({success: false, error: error.message});
     }
 });
 
