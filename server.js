@@ -55,7 +55,7 @@ try {
 const app = express();
 app.set('trust proxy', 1);
 
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '100kb' }));
 app.use(cors({
   origin: true, // Allow all origins
   credentials: true,
@@ -75,7 +75,7 @@ app.use((err, req, res, next) => {
   next();
 });
 
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
+app.use(express.urlencoded({ limit: '100kb', extended: true }));
 app.use(helmet());
 app.use(mongoSanitize());
 const limiter = rateLimit({
@@ -86,7 +86,7 @@ const limiter = rateLimit({
     message: "Terlalu banyak request, silakan coba lagi setelah beberapa saat"
   }
 });
-// app.use("/api", limiter)
+app.use("/api", limiter)
 app.use(morgan('dev'))
 app.use("/api/user", userRoutes);
 // app.use('/api/sensors', sensorRoutes);

@@ -27,6 +27,8 @@ const getSensorModel = (sensorID) => {
     timestamps: true,
     collection: collectionName
   });
+  sensorSchema.index({ Waktu: -1 });
+  sensorSchema.index({ nodeID: 1, Waktu: -1 });
 
   return mongoose.model(collectionName, sensorSchema);
 };

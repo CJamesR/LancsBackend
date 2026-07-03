@@ -13,6 +13,12 @@ class MQTTHandler {
     this.mqttClient = null;
     this.host = process.env.MQTT_BROKER;
     console.log('🔗 MQTT Broker:', this.host);
+
+    this.sensorDataBuffer = {};
+
+    setInterval(() => this.flushSensorDataBuffer(), 30000);
+
+
   }
 
   // =========================================================================
@@ -204,6 +210,24 @@ async handleGatewayRegister(data) {
     }
   }
 
+  async flushSensorDataBuffer(){
+    for (const gateID in this.sensorDataBuffer){
+      const dataToInsert = this.sensorDataBuffer[gateID];
+
+      if (dataToInsert.length > 0) {
+        try {
+          const SensorModel = getSensorModel(gateID);
+          await SensorModel.insertMany(dataToInsert);
+          console.log(`✅ [BULK WRITE] ${dataToInsert.length} data stored in sensor_${gateID}`);
+
+          this.sensorDataBuffer[gateID] = [];
+        } catch (error) {
+          console.error(`❌ [BULK WRITE FAILED] sensor_${gateID}:`, error.message);
+        }
+      }
+    }
+  }
+
   async processSensorData(data) {
     try {
       console.log('\n📥 [MQTT IN] Data sensor:');
@@ -269,8 +293,14 @@ async handleGatewayRegister(data) {
       // karena satu Gateway bisa punya banyak node — data dari semua node
       // yang lewat gateway yang sama masuk ke koleksi yang sama,
       // dan dibedakan oleh field nodeID di dalam dokumen.
-      const SensorModel = getSensorModel(gateID);
-      await new SensorModel({
+      if (!this.sensorDataBuffer[gateID]) {
+        this.sensorDataBuffer[gateID] = [];
+      }
+      if (this.sensorDataBuffer[gateID].length > 5000) {
+        this.sensorDataBuffer[gateID].shift();
+        console.warn(`⚠️ Buffer full for ${gateID}, old data discarded to prevent OOM.`)
+      }
+      this.sensorDataBuffer[gateID].push({
         gateID,
         nodeID: nodeID || '-',
         Suhu: parseFloat(Suhu),
@@ -280,7 +310,7 @@ async handleGatewayRegister(data) {
         Waktu: waktuUntukDB,
         Checksum: Checksum || null,
         source: 'mqtt'
-      }).save();
+      });
       console.log(`✅ Data saved → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
 
       // ── TUGAS 2: Bangun relasi Node → Gateway ──────────────────────────
@@ -326,7 +356,6 @@ async handleGatewayRegister(data) {
       console.error('❌ Error processSensorData:', error.message);
     }
   }
-
   // =========================================================================
   // HELPER: Perbarui status Gateway di model baru DAN Device lama
   // =========================================================================
