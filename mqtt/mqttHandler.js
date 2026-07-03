@@ -50,8 +50,8 @@ class MQTTHandler {
       keepalive: 60,
       clientId: 'nodejs_lancsSK_' + Math.random().toString(16).substr(2, 8),
       clean: true,
-      username: 'lancsdev',
-      password: 'Lancsdev1',
+      username: process.env.MQTT_USERNAME,
+      password: process.env.MQTT_PASSWORD,
       reconnectPeriod: 1000,
       connectTimeout: 30 * 1000,
     };
@@ -70,6 +70,8 @@ class MQTTHandler {
       this.mqttClient.subscribe('LancsSK/+/data', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/status', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/device/status', { qos: 0 });
+      this.mqttClient.subscribe('LancsSK/gateway/ack', { qos: 0 });
+      this.mqttClient.subscribe('LancsSK/ack', { qos: 0 });
     });
 
     this.mqttClient.on('message', async (topic, message) => {
@@ -81,9 +83,6 @@ class MQTTHandler {
     });
   }
 
-  // =========================================================================
-  // ROUTER PESAN — if/else if yang benar, tidak ada kebocoran antar topik
-  // =========================================================================
   async handleMessage(topic, message) {
     let data;
     try {
@@ -103,6 +102,10 @@ class MQTTHandler {
       if (data.cmd === 'pairing_active') {
         console.log(`🔄 Pairing Mode activated for Gateway: ${data.gateway_mac || 'broadcast'}`);
       }
+    } else if (topic === 'LancsSK/ack') {
+      console.log('📥 [MQTT IN] Status Node:', data);
+    } else if (topic === 'LancsSK/gateway/ack') {
+      console.log('📥 [MQTT IN] Gateway ACK:', data);
     } else if (
       topic === 'LancsSK/sensor/data' ||
       (topic.startsWith('LancsSK/') && topic.endsWith('/data'))
@@ -288,11 +291,6 @@ async handleGatewayRegister(data) {
         global.io.emit(`update_${gateID}`, socketPayload);
       }
 
-      // ── Simpan time-series ke koleksi sensor_<gateID> ────────────────
-      // Koleksi tetap dikey-kan ke gateID (MAC Gateway) bukan nodeID,
-      // karena satu Gateway bisa punya banyak node — data dari semua node
-      // yang lewat gateway yang sama masuk ke koleksi yang sama,
-      // dan dibedakan oleh field nodeID di dalam dokumen.
       if (!this.sensorDataBuffer[gateID]) {
         this.sensorDataBuffer[gateID] = [];
       }
@@ -356,9 +354,7 @@ async handleGatewayRegister(data) {
       console.error('❌ Error processSensorData:', error.message);
     }
   }
-  // =========================================================================
-  // HELPER: Perbarui status Gateway di model baru DAN Device lama
-  // =========================================================================
+
   async updateGatewayStatus(gateID, suhu) {
     // Update Gateway model baru
     await Gateway.findOneAndUpdate(
@@ -392,9 +388,54 @@ async handleGatewayRegister(data) {
     }
   }
 
-  // =========================================================================
-  // HELPER: Cek batas suhu dan buat notifikasi jika perlu
-  // =========================================================================
+  async handleNodeConnectionStatus(data) {
+    try {
+      const { gateID, nodeID, status, message } = data;
+
+      if (!gateID || !nodeID) {
+        console.warn('⚠️ Payload status node tidak lengkap:', data);
+        return;
+      }
+
+      console.log(`\n🔗 [MQTT IN] Status Koneksi Node: ${nodeID} -> ${gateID} (${status})`);
+
+      // 1. Update status Node di Database jika berhasil
+      if (status === 'success') {
+        const gateway = await Gateway.findOne({ mac: gateID.toUpperCase() });
+        
+        await Node.findOneAndUpdate(
+          { nodeID: nodeID.toUpperCase() },
+          {
+            $set: {
+              gateID: gateway ? gateway._id : null,
+              siteId: gateway ? gateway.siteId : null,
+              isOnline: true,
+              lastSeen: new Date()
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        console.log(`✅ Database diupdate: Node ${nodeID} terdaftar di Gateway ${gateID}`);
+      }
+
+      // 2. Tembakkan (Emit) ke Flutter melalui Socket.io
+      if (global.io) {
+        const eventName = `node_status_${gateID.toUpperCase()}`;
+        global.io.emit(eventName, {
+          gateID: gateID,
+          nodeID: nodeID,
+          status: status, 
+          message: message || (status === 'success' ? 'Node berhasil terhubung' : 'Koneksi gagal'),
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📤 [SOCKET OUT] Emit event: ${eventName}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error handleNodeConnectionStatus:', error.message);
+    }
+  }
+
   async checkAndCreateAlert(entity, suhu, deviceId) {
     const maxT = entity.maxTemp || 35;
     const minT = entity.minTemp || 15;
@@ -431,9 +472,6 @@ async handleGatewayRegister(data) {
     }
   }
 
-  // =========================================================================
-  // PUBLISH — Kirim pesan ke MQTT broker
-  // =========================================================================
   publish(topic, message) {
     if (this.mqttClient && this.mqttClient.connected) {
       this.mqttClient.publish(topic, message);
@@ -442,31 +480,6 @@ async handleGatewayRegister(data) {
     }
   }
 
-  // =========================================================================
-  // FASE 1 TOPIK 2 — Kirim perintah ke Gateway via MQTT
-  // Dipanggil oleh endpoint: POST /api/flutter/gateway/:mac/cmd
-  //
-  // Perintah yang didukung saat ini:
-  //   pairing_active — aktifkan mode BLE pairing di Gateway
-  //   set_wifi       — update kredensial WiFi Gateway (hanya berlaku jika
-  //                    Gateway sudah online via WiFi sebelumnya)
-  //
-  // Catatan: provisioning WiFi PERTAMA KALI tidak lewat sini.
-  // Alur awal: Gateway buka AP → Flutter connect langsung ke AP Gateway →
-  // Flutter POST credentials ke Gateway (HTTP ke 192.168.4.1) → Gateway
-  // connect ke WiFi → Gateway online → baru endpoint ini bisa dipakai
-  // untuk update credentials berikutnya.
-  //
-  // @param {string} gatewayMac  - MAC address Gateway tujuan
-  // @param {string} cmd         - 'pairing_active' | 'set_wifi'
-  // @param {object} extraPayload - field tambahan, misal { ssid, password }
-  // =========================================================================
-// =========================================================================
-  // FUNGSI PICUAN (TRIGGER) UNTUK REST API
-  // @param {string} gatewayMac  - MAC address Gateway tujuan (Wajib)
-  // @param {string} cmd         - Perintah eksekusi (contoh: 'pairing_active')
-  // @param {object} extraPayload - Field tambahan dinamis
-  // =========================================================================
   sendGatewayCommand(gatewayMac, cmd, extraPayload = {}) {
     // 1. Validasi Absolut: Cegah pengiriman tanpa arah rute yang spesifik
     if (!gatewayMac) {
