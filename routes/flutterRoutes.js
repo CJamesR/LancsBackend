@@ -15,6 +15,7 @@ const mqttHandler = require('../mqtt/mqttHandler');
 const siteController = require('../controllers/siteController');
 const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 const Transaction = require('../models/transactionModel');
+const crypto = require('crypto');
 
 // =========================================================================
 // 🛠️ FUNGSI HELPER
@@ -408,7 +409,7 @@ router.delete('/gateway/:mac/delete', protect, apiLimiter, async (req, res) => {
         const targetMac = req.params.mac.toUpperCase();
         const isForceDelete = req.query.force === 'true';
 
-        if (!isForceDelete) {
+        if (isForceDelete) {
             const gateway = await Gateway.findOneAndDelete({ mac: targetMac });
             if (gateway) {
                 await Node.deleteMany({ $or: [{ gateID: gateway._id}, {gatewayId: gateway._id}] });
@@ -418,6 +419,7 @@ router.delete('/gateway/:mac/delete', protect, apiLimiter, async (req, res) => {
             }
             return res.status(200).json({success: true, message: 'Force delete successful'});
         }
+
         const req_id = crypto.randomUUID();
         await Transaction.create({ req_id, target_mac: targetMac, type: 'gateway', status: 'pending' });
 
