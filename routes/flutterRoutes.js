@@ -409,6 +409,8 @@ router.delete('/gateway/:mac/delete', protect, apiLimiter, async (req, res) => {
         const targetMac = req.params.mac.toUpperCase();
         const isForceDelete = req.query.force === 'true';
 
+        console.log(`\n🗑️ [TEARDOWN] API Hit! Menghapus Gateway: ${targetMac} | Force: ${isForceDelete}`);
+
         if (isForceDelete) {
             const gateway = await Gateway.findOneAndDelete({ mac: targetMac });
             if (gateway) {
@@ -417,16 +419,29 @@ router.delete('/gateway/:mac/delete', protect, apiLimiter, async (req, res) => {
                     await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: targetMac } });
                 }
             }
+            console.log(`✅ [TEARDOWN] Force delete berhasil dieksekusi di Database.`);
             return res.status(200).json({success: true, message: 'Force delete successful'});
         }
 
         const req_id = crypto.randomUUID();
+        console.log(`⏳ [TEARDOWN] Membuat Transaksi ID: ${req_id}`);
         await Transaction.create({ req_id, target_mac: targetMac, type: 'gateway', status: 'pending' });
 
-        mqttHandler.sendGatewayCommand(targetMac, 'delete_gateway', { req_id });
+        console.log(`📤 [TEARDOWN] Mencoba mengirim MQTT ke topik: LancsSK/gateway/cmd/${targetMac}`);
+        const isSent = mqttHandler.sendGatewayCommand(targetMac, 'delete_gateway', { req_id });
 
+        if (!isSent) {
+            console.error(`❌ [TEARDOWN] GAGAL KIRIM! MQTT Client Node.js tidak terkoneksi ke Broker.`);
+            return res.status(503).json({
+                success: false, 
+                message: 'Perintah gagal dikirim. Backend Node.js tidak terkoneksi ke MQTT.'
+            });
+        }
+
+        console.log(`✅ [TEARDOWN] Perintah MQTT berhasil meluncur! Menunggu perangkat...`);
         res.status(202).json({status: 'processing', req_id});
     } catch (error) {
+        console.error(`🔥 [TEARDOWN FATAL ERROR]:`, error);
         res.status(500).json({success: false, error: error.message}); 
     }
 });
@@ -435,24 +450,44 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
     try {
         const targetMac = req.params.serialId.toUpperCase();
         const isForceDelete = req.query.force === 'true';
+        
+        console.log(`\n🗑️ [TEARDOWN] API Hit! Menghapus Node: ${targetMac} | Force: ${isForceDelete}`);
 
         const node = await Node.findOne({$or: [{ nodeID: targetMac }, { serialID: targetMac }]}).populate('gateID gatewayId');
 
         if (isForceDelete) {
             await Node.findOneAndDelete({$or: [{ nodeID: targetMac }, {serialID: targetMac }]});
+            console.log(`✅ [TEARDOWN] Force delete Node berhasil.`);
             return res.status(200).json({success: true, message: 'Force delete successful'});
         }
-        if (!node) return res.status(404).json({success: false, message: 'Node not found'});
+        
+        if (!node) {
+            console.log(`❌ [TEARDOWN] Node tidak ditemukan di DB.`);
+            return res.status(404).json({success: false, message: 'Node not found'});
+        }
 
         const gateway = node.gateID || node.gatewayId;
-        if (!gateway) return res.status(400).json({success: false, message: 'Node is orphaned, use force delete'});
+        if (!gateway) {
+            console.log(`❌ [TEARDOWN] Node kehilangan induk (Orphaned).`);
+            return res.status(400).json({success: false, message: 'Node is orphaned, use force delete'});
+        }
 
         const req_id = crypto.randomUUID();
+        console.log(`⏳ [TEARDOWN] Membuat Transaksi ID: ${req_id}`);
         await Transaction.create({ req_id, target_mac: targetMac, type: 'node', status: 'pending' });
 
-        mqttHandler.sendGatewayCommand(gateway.mac, 'delete_node', { req_id, node_serial: targetMac });
+        console.log(`📤 [TEARDOWN] Mengirim instruksi hapus node ke Gateway: ${gateway.mac}`);
+        const isSent = mqttHandler.sendGatewayCommand(gateway.mac, 'delete_node', { req_id, node_serial: targetMac });
+        
+        if (!isSent) {
+            console.error(`❌ [TEARDOWN] GAGAL KIRIM MQTT Node!`);
+            return res.status(503).json({success: false, message: 'Backend tidak terkoneksi ke MQTT.'});
+        }
+
+        console.log(`✅ [TEARDOWN] Perintah MQTT (Node) berhasil meluncur!`);
         res.status(202).json({status: 'processing', req_id});
     } catch (error) {
+        console.error(`🔥 [TEARDOWN FATAL ERROR]:`, error);
         res.status(500).json({success: false, error: error.message});
     }
 });

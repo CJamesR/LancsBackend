@@ -71,7 +71,7 @@ class MQTTHandler {
       this.mqttClient.subscribe('LancsSK/status', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/device/status', { qos: 0 });
       this.mqttClient.subscribe('LancsSK/gateway/ack', { qos: 0 });
-      this.mqttClient.subscribe('LancsSK/ack', { qos: 0 });
+      this.mqttClient.subscribe('LancsSK/sensor/register', { qos: 1 });
     });
 
     this.mqttClient.on('message', async (topic, message) => {
@@ -106,6 +106,8 @@ class MQTTHandler {
       console.log('📥 [MQTT IN] Status Node:', data);
     } else if (topic === 'LancsSK/gateway/ack') {
       console.log('📥 [MQTT IN] Gateway ACK:', data);
+    } else if (topic === 'LancsSK/sensor/register') {
+      await this.handleNodeConnectionStatus(data); 
     } else if (
       topic === 'LancsSK/sensor/data' ||
       (topic.startsWith('LancsSK/') && topic.endsWith('/data'))
@@ -140,6 +142,12 @@ async handleGatewayRegister(data) {
           const site = await Site.findById(siteId);
           if (site) {
               actualSiteObjectId = site._id;
+              
+              const existingGateway = await Gateway.findOne({ mac: gateway_mac.toUpperCase() });
+              if (existingGateway && existingGateway.siteId && existingGateway.siteId.toString() !== actualSiteObjectId.toString()) {
+                  console.log(`⚠️ Memindahkan Gateway dari Site lama: ${existingGateway.siteId}`);
+                  await Site.findByIdAndUpdate(existingGateway.siteId, { $pull: { devices: gateway_mac.toUpperCase() } });
+              }
               console.log(`✅ [DEBUG] Site found. Translation successful: ObjectId(${actualSiteObjectId})`);
               console.log(`🔄 [DEBUG] Adding MAC ${gateway_mac.toUpperCase()} to the devices list in Site...`);
               await Site.findByIdAndUpdate(site._id, { $addToSet: { devices: gateway_mac.toUpperCase() } });
@@ -178,10 +186,25 @@ async handleGatewayRegister(data) {
   }
 
   async handleTeardownAck(data) {
-    const { status, req_id } = data;
+    const { status, req_id, gateway_mac } = data;
     console.log(`\n📥 [MQTT IN] Konfirmasi Teardown Diterima: ${status} | ReqID: ${req_id}`);
 
     try {
+      // 🔥 FIX 2: Eksekusi hapus langsung jika itu adalah reset manual dari tombol fisik
+      if (req_id === 'MANUAL_BTN_RESET') {
+        if (gateway_mac) {
+          const gateway = await Gateway.findOneAndDelete({ mac: gateway_mac.toUpperCase() });
+          if (gateway) {
+            await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
+            if (gateway.siteId) {
+              await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: gateway_mac.toUpperCase() } });
+            }
+          }
+          console.log(`✅ [TEARDOWN] Gateway ${gateway_mac} berhasil di-reset manual.`);
+        }
+        return; 
+      }
+
       // 1. Cari transaksi yang diinisiasi oleh pengguna Flutter
       const trx = await Transaction.findOne({ req_id });
       if (!trx || trx.status !== 'pending') return;
