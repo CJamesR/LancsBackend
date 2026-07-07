@@ -199,32 +199,51 @@ router.get('/node/:serialId/detail', protect, async (req, res) => {
 // =========================================================================
 // 3. RENAME
 // =========================================================================
-const renameHandler = (Model, searchField) => async (req, res) => {
-    try {
-        if (!req.body.newName) return res.status(400).json({ success: false, message: 'New name required.' });
-        const doc = await Model.findOneAndUpdate(
-            { [searchField]: req.params.id.toUpperCase() },
-            { name: req.body.newName.trim() },
-            { new: true }
-        );
-        if (!doc) return res.status(404).json({ success: false, message: 'Not found.' });
-        res.json({ success: true, message: 'Renamed successfully', data: { id: req.params.id, name: doc.name } });
-    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
-};
+// Replace the existing two rename routes with site-scoped versions
 
-router.patch('/gateway/:id/rename', protect, apiLimiter, renameHandler(Gateway, 'mac'));
-router.patch('/device/:id/rename', protect, apiLimiter, renameHandler(Device, 'serialID'));
-router.patch('/node/:id/rename', protect, apiLimiter, async (req, res) => {
+router.patch('/sites/:siteId/gateways/:mac/rename', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
     try {
         const { newName } = req.body;
-        if (!newName) return res.status(400).json({ success: false, message: 'New name required.' });
-        const node = await Node.findOneAndUpdate(
-            { nodeID: req.params.id.toUpperCase() },
+        if (!newName || !newName.trim()) {
+            return res.status(400).json({ success: false, message: 'New name required.' });
+        }
+        const mac = req.params.mac.toUpperCase();
+
+        const gateway = await Gateway.findOneAndUpdate(
+            { mac, siteId: req.params.siteId }, // scoped: must belong to this site
             { name: newName.trim() },
             { new: true }
         );
+        if (!gateway) {
+            return res.status(404).json({ success: false, message: 'Gateway not found on this site.' });
+        }
+
+        await logActivity(req, req.params.siteId, `Renamed gateway ${mac} to "${gateway.name}"`);
+        res.json({ success: true, data: { id: gateway._id, mac: gateway.mac, name: gateway.name } });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+router.patch('/sites/:siteId/nodes/:nodeId/rename', protect, checkSiteRole(['owner', 'admin']), async (req, res) => {
+    try {
+        const { newName } = req.body;
+        if (!newName || !newName.trim()) {
+            return res.status(400).json({ success: false, message: 'New name required.' });
+        }
+
+        // Node doesn't store siteId reliably in all paths (some set it, some don't per
+        // your model comment) — verify via its gateway's siteId instead, which mqttHandler
+        // does populate on first MQTT message.
+        const node = await Node.findById(req.params.nodeId).populate('gateID');
         if (!node) return res.status(404).json({ success: false, message: 'Node not found.' });
-        res.json({ success: true, data: { name: node.name } });
+        if (!node.gateID || node.gateID.siteId?.toString() !== req.params.siteId) {
+            return res.status(403).json({ success: false, message: 'Node does not belong to this site.' });
+        }
+
+        node.name = newName.trim();
+        await node.save();
+
+        await logActivity(req, req.params.siteId, `Renamed node ${node.nodeID} to "${node.name}"`);
+        res.json({ success: true, data: { id: node._id, nodeId: node.nodeID, name: node.name } });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
