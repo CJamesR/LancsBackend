@@ -474,10 +474,21 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
 
         const req_id = crypto.randomUUID();
         console.log(`⏳ [TEARDOWN] Membuat Transaksi ID: ${req_id}`);
-        await Transaction.create({ req_id, target_mac: targetMac, type: 'node', status: 'pending' });
+        
+        await Transaction.create({ 
+            req_id: req_id, 
+            gateway_mac: gateway.mac,
+            node_mac: targetMac, 
+            type: 'node', 
+            status: 'pending_delete' 
+        });
 
         console.log(`📤 [TEARDOWN] Mengirim instruksi hapus node ke Gateway: ${gateway.mac}`);
-        const isSent = mqttHandler.sendGatewayCommand(gateway.mac, 'delete_node', { req_id, node_serial: targetMac });
+        
+        const isSent = mqttHandler.sendGatewayCommand(gateway.mac, 'delete_node', { 
+            req_id: req_id, 
+            node_mac: targetMac 
+        });
         
         if (!isSent) {
             console.error(`❌ [TEARDOWN] GAGAL KIRIM MQTT Node!`);
@@ -489,6 +500,52 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
     } catch (error) {
         console.error(`🔥 [TEARDOWN FATAL ERROR]:`, error);
         res.status(500).json({success: false, error: error.message});
+    }
+});
+
+// =========================================================================
+// PROTOKOL INTEGRASI: PENGHAPUSAN MULTIKOLOM (BATCH DELETION)
+// =========================================================================
+router.post('/nodes/delete-batch', protect, apiLimiter, async (req, res) => {
+    try {
+        const { gateway_mac, node_macs } = req.body;
+
+        if (!gateway_mac || !Array.isArray(node_macs) || node_macs.length === 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Format payload tidak valid. Pastikan gateway_mac dan node_macs (sebagai array) tersedia.' 
+            });
+        }
+
+        const targetGateway = gateway_mac.toUpperCase();
+        console.log(`\n🗑️ [TEARDOWN BATCH] API Hit! Inisialisasi antrean untuk ${node_macs.length} Node pada Gateway: ${targetGateway}`);
+
+        // 1. Merakit array data pelacakan dengan status awal pending_delete
+        const transactions = node_macs.map(mac => ({
+            req_id: crypto.randomUUID(),
+            gateway_mac: targetGateway,
+            node_mac: mac.toUpperCase(),
+            type: 'node',
+            status: 'pending_delete'
+        }));
+
+        // 2. Menyuntikkan seluruh entitas ke MongoDB secara serentak (Tanpa for/while MQTT)
+        await Transaction.insertMany(transactions);
+        console.log(`✅ [TEARDOWN BATCH] ${transactions.length} entitas disuntikkan ke antrean MongoDB.`);
+
+        // 3. Memanggil Trigger Engine untuk mengeksekusi antrean urutan pertama
+        mqttHandler.processNextDeletion(targetGateway);
+
+        // Langsung berikan respons asinkron ke aplikasi (tidak perlu menunggu MQTT selesai)
+        res.status(202).json({
+            success: true,
+            status: 'processing_batch',
+            message: `Penghapusan ${node_macs.length} node sedang diorkestrasi di latar belakang.`
+        });
+
+    } catch (error) {
+        console.error(`🔥 [TEARDOWN BATCH FATAL ERROR]:`, error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 

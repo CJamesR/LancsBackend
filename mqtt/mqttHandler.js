@@ -186,11 +186,11 @@ async handleGatewayRegister(data) {
   }
 
   async handleTeardownAck(data) {
-    const { status, req_id, gateway_mac } = data;
+    // Mengekstrak parameter dari payload balasan perangkat keras
+    const { status, req_id, gateway_mac, node_mac } = data; 
     console.log(`\n📥 [MQTT IN] Konfirmasi Teardown Diterima: ${status} | ReqID: ${req_id}`);
 
     try {
-      // 🔥 FIX 2: Eksekusi hapus langsung jika itu adalah reset manual dari tombol fisik
       if (req_id === 'MANUAL_BTN_RESET') {
         if (gateway_mac) {
           const gateway = await Gateway.findOneAndDelete({ mac: gateway_mac.toUpperCase() });
@@ -205,31 +205,33 @@ async handleGatewayRegister(data) {
         return; 
       }
 
-      // 1. Cari transaksi yang diinisiasi oleh pengguna Flutter
+      // Mencari transaksi yang terkait dengan req_id
       const trx = await Transaction.findOne({ req_id });
-      if (!trx || trx.status !== 'pending') return;
+      // Evaluasi apakah status mencakup instruksi pending_delete
+      if (!trx || (!trx.status.includes('pending'))) return;
 
-      // 2. Eksekusi Hapus Gateway
       if (status === 'deleted_gw' && trx.type === 'gateway') {
-        const gateway = await Gateway.findOneAndDelete({ mac: trx.target_mac });
+        // (Logika eksisting untuk Gateway - akan diperbarui di part selanjutnya jika diperlukan)
+        const gateway = await Gateway.findOneAndDelete({ mac: trx.gateway_mac });
         if (gateway) {
-          // Bersihkan semua Node terkait
           await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
-          // Bersihkan dari Site
           if (gateway.siteId) {
-            await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: trx.target_mac } });
+            await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: trx.gateway_mac } });
           }
         }
+        trx.status = 'completed';
+        await trx.save();
       } 
-      // 3. Eksekusi Hapus Node Saja
       else if (status === 'deleted_node' && trx.type === 'node') {
-        await Node.findOneAndDelete({ $or: [{ nodeID: trx.target_mac }, { serialId: trx.target_mac }] });
+        // Mutasi pangkalan data untuk mengakhiri siklus hidup Node (menghapus entri Node)
+        await Node.findOneAndDelete({ $or: [{ nodeID: trx.node_mac }, { serialId: trx.node_mac }] });
+        
+        // Memutasi status transaksi menjadi 'deleted' sesuai spesifikasi protokol resolusi asinkron
+        trx.status = 'deleted';
+        await trx.save();
+        console.log(`✅ [TEARDOWN] Resolusi Asinkron: Siklus hidup Node ${trx.node_mac} diakhiri dan status diubah menjadi deleted.`);
+        await this.processNextDeletion(gateway_mac || trx.gateway_mac);
       }
-
-      // 4. Ubah status transaksi agar Flutter tahu proses telah selesai
-      trx.status = 'completed';
-      await trx.save();
-      console.log(`✅ [TEARDOWN] Perangkat ${trx.target_mac} sukses dihapus dari Database.`);
       
     } catch (error) {
       console.error('❌ Error saat memproses Teardown ACK:', error.message);
@@ -528,6 +530,31 @@ async handleGatewayRegister(data) {
     console.log(`📤 [MQTT OUT] Transmission order from '${cmd}' have been launch to: ${targetTopic}`);
     
     return true;
+  }
+
+  async processNextDeletion(gatewayMac) {
+    try {
+      // 1. Mencari satu antrean terlama (FIFO) berdasarkan gateway_mac
+      const nextTarget = await Transaction.findOne({
+        gateway_mac: gatewayMac,
+        status: 'pending_delete',
+        type: 'node'
+      }).sort({ createdAt: 1 }); // Urutkan berdasarkan waktu pembuatan terlama
+
+      if (nextTarget) {
+        console.log(`⏳ [QUEUE ENGINE] Menembakkan perintah hapus untuk Node: ${nextTarget.node_mac} ke Gateway ${gatewayMac}`);
+        
+        // 2. Menembakkan perintah dan membiarkan sistem kembali asinkron
+        this.sendGatewayCommand(gatewayMac, 'delete_node', {
+          req_id: nextTarget.req_id,
+          node_mac: nextTarget.node_mac
+        });
+      } else {
+        console.log(`✅ [QUEUE ENGINE] Semua antrean node untuk Gateway ${gatewayMac} telah tuntas.`);
+      }
+    } catch (error) {
+      console.error(`❌ [QUEUE ENGINE ERROR] Gagal mengeksekusi rotasi antrean:`, error.message);
+    }
   }
 }
 
