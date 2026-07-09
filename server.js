@@ -130,38 +130,38 @@ setTimeout(() => {
 app.get("/api/sensor/public/latest/:sensorId", sensorController.getLatestSensorDataPublic);
 
 // ✅ PUBLIC ROUTE FOR FLUTTER DEVICES (sesuai dengan yang diharapkan Flutter)
-app.get("/api/devices", async (req, res) => {
-  try {
-    console.log('📡 GET /api/devices - Fetching all sensor collections for Flutter');
+// app.get("/api/devices", async (req, res) => {
+//   try {
+//     console.log('📡 GET /api/devices - Fetching all sensor collections for Flutter');
 
-    const collections = await mongoose.connection.db.listCollections().toArray();
-    const sensorCollections = collections.filter(col =>
-      col.name.startsWith('sensor_') &&
-      !col.name.includes('undefined')
-    );
+//     const collections = await mongoose.connection.db.listCollections().toArray();
+//     const sensorCollections = collections.filter(col =>
+//       col.name.startsWith('sensor_') &&
+//       !col.name.includes('undefined')
+//     );
 
-    console.log(`🔍 Found ${sensorCollections.length} sensor collections`);
+//     console.log(`🔍 Found ${sensorCollections.length} sensor collections`);
 
-    // Format response sesuai dengan yang diharapkan Flutter
-    const devices = sensorCollections.map(col => {
-      const sensorId = col.name.replace('sensor_', '');
-      return {
-        id: sensorId,
-        name: `Sensor ${sensorId}`,
-      };
-    });
+//     // Format response sesuai dengan yang diharapkan Flutter
+//     const devices = sensorCollections.map(col => {
+//       const sensorId = col.name.replace('sensor_', '');
+//       return {
+//         id: sensorId,
+//         name: `Sensor ${sensorId}`,
+//       };
+//     });
 
-    res.json(devices);
+//     res.json(devices);
 
-  } catch (error) {
-    console.error('❌ Error fetching devices:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching devices',
-      error: error.message
-    });
-  }
-});
+//   } catch (error) {
+//     console.error('❌ Error fetching devices:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Error fetching devices',
+//       error: error.message
+//     });
+//   }
+// });
 
 // ✅ 5. MQTT CONTROL ROUTES
 app.post("/api/control/:sensorId", protect, (req, res) => {
@@ -229,9 +229,6 @@ app.get("/", (req, res) => {
 app.get("/api/data/stats", protect, dataController.getDashboardStats);
 app.get("/api/data/chart/:deviceId", protect, dataController.getChartData);
 
-// ✅ 8. DEVICE MANAGEMENT ROUTES (untuk Flutter HomePage)
-app.use("/api/devices", protect, deviceRoutes);
-
 // ==================== ERROR HANDLING ====================
 // 404 handler
 app.use((req, res) => {
@@ -262,168 +259,168 @@ app.use((err, req, res, next) => {
 });
 
 // ✅ ENDPOINT UNTUK GET SENSOR DATA LANGSUNG (tanpa auth)
-app.get("/api/sensors/all", async (req, res) => {
-  try {
-    console.log('📡 GET /api/sensors/all - Fetching all sensor data');
+// app.get("/api/sensors/all", async (req, res) => {
+//   try {
+//     console.log('📡 GET /api/sensors/all - Fetching all sensor data');
 
-    const collections = await mongoose.connection.db.listCollections().toArray();
-    const sensorCollections = collections.filter(col =>
-      col.name.startsWith('sensor_') &&
-      !col.name.includes('undefined')
-    );
+//     const collections = await mongoose.connection.db.listCollections().toArray();
+//     const sensorCollections = collections.filter(col =>
+//       col.name.startsWith('sensor_') &&
+//       !col.name.includes('undefined')
+//     );
 
-    console.log(`🔍 Found ${sensorCollections.length} sensor collections`);
+//     console.log(`🔍 Found ${sensorCollections.length} sensor collections`);
 
-    // Get latest data from each sensor
-    const sensorsData = await Promise.all(
-      sensorCollections.map(async (col) => {
-        try {
-          const sensorId = col.name.replace('sensor_', '');
-          const SensorModel = getSensorModel(sensorId);
+//     // Get latest data from each sensor
+//     const sensorsData = await Promise.all(
+//       sensorCollections.map(async (col) => {
+//         try {
+//           const sensorId = col.name.replace('sensor_', '');
+//           const SensorModel = getSensorModel(sensorId);
 
-          // Get latest data
-          const latestData = await SensorModel.findOne()
-            .sort({ Waktu: -1 })
-            .lean();
+//           // Get latest data
+//           const latestData = await SensorModel.findOne()
+//             .sort({ Waktu: -1 })
+//             .lean();
 
-          // Get count of records
-          const count = await SensorModel.countDocuments();
+//           // Get count of records
+//           const count = await SensorModel.countDocuments();
 
-          return {
-            id: sensorId,
-            name: `Sensor ${sensorId}`,
-            collection: col.name,
-            status: latestData ? 'active' : 'inactive',
-            lastUpdated: latestData?.Waktu || null,
-            latestData: latestData ? {
-              temperature: latestData.Suhu,
-              humidity: latestData.Kelembapan,
-              timestamp: latestData.Waktu
-            } : null,
-            totalRecords: count,
-            canAccess: true
-          };
-        } catch (error) {
-          console.error(`Error processing ${col.name}:`, error.message);
-          return {
-            id: col.name.replace('sensor_', ''),
-            name: `Sensor ${col.name.replace('sensor_', '')}`,
-            collection: col.name,
-            status: 'error',
-            error: error.message
-          };
-        }
-      })
-    );
+//           return {
+//             id: sensorId,
+//             name: `Sensor ${sensorId}`,
+//             collection: col.name,
+//             status: latestData ? 'active' : 'inactive',
+//             lastUpdated: latestData?.Waktu || null,
+//             latestData: latestData ? {
+//               temperature: latestData.Suhu,
+//               humidity: latestData.Kelembapan,
+//               timestamp: latestData.Waktu
+//             } : null,
+//             totalRecords: count,
+//             canAccess: true
+//           };
+//         } catch (error) {
+//           console.error(`Error processing ${col.name}:`, error.message);
+//           return {
+//             id: col.name.replace('sensor_', ''),
+//             name: `Sensor ${col.name.replace('sensor_', '')}`,
+//             collection: col.name,
+//             status: 'error',
+//             error: error.message
+//           };
+//         }
+//       })
+//     );
 
-    // Filter hanya yang ada data
-    const activeSensors = sensorsData.filter(s => s.latestData);
+//     // Filter hanya yang ada data
+//     const activeSensors = sensorsData.filter(s => s.latestData);
 
-    res.json({
-      success: true,
-      message: `Found ${activeSensors.length} active sensors`,
-      data: {
-        sensors: activeSensors,
-        totalSensors: sensorCollections.length,
-        activeSensors: activeSensors.length,
-        inactiveSensors: sensorsData.length - activeSensors.length,
-        timestamp: new Date().toISOString()
-      }
-    });
+//     res.json({
+//       success: true,
+//       message: `Found ${activeSensors.length} active sensors`,
+//       data: {
+//         sensors: activeSensors,
+//         totalSensors: sensorCollections.length,
+//         activeSensors: activeSensors.length,
+//         inactiveSensors: sensorsData.length - activeSensors.length,
+//         timestamp: new Date().toISOString()
+//       }
+//     });
 
-  } catch (error) {
-    console.error('❌ Error fetching all sensors:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching sensor data',
-      error: error.message
-    });
-  }
-});
+//   } catch (error) {
+//     console.error('❌ Error fetching all sensors:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Error fetching sensor data',
+//       error: error.message
+//     });
+//   }
+// });
 
 
-app.get("/api/test/sensors", async (req, res) => {
-  try {
-    const collections = await mongoose.connection.db.listCollections().toArray();
-    const sensorCollections = collections.filter(col =>
-      col.name.startsWith('sensor_')
-    );
+// app.get("/api/test/sensors", async (req, res) => {
+//   try {
+//     const collections = await mongoose.connection.db.listCollections().toArray();
+//     const sensorCollections = collections.filter(col =>
+//       col.name.startsWith('sensor_')
+//     );
 
-    res.json({
-      message: "Testing sensor collections",
-      collections: sensorCollections.map(col => col.name),
-      count: sensorCollections.length
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+//     res.json({
+//       message: "Testing sensor collections",
+//       collections: sensorCollections.map(col => col.name),
+//       count: sensorCollections.length
+//     });
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 // ✅ GET data dari sensor tertentu (tanpa auth, untuk testing)
-app.get("/api/sensors/:sensorId/data", async (req, res) => {
-  try {
-    const { sensorId } = req.params;
-    const { limit = "10" } = req.query;
+// app.get("/api/sensors/:sensorId/data", async (req, res) => {
+//   try {
+//     const { sensorId } = req.params;
+//     const { limit = "10" } = req.query;
 
-    console.log(`📡 GET /api/sensors/${sensorId}/data - Limit: ${limit}`);
+//     console.log(`📡 GET /api/sensors/${sensorId}/data - Limit: ${limit}`);
 
-    const SensorModel = getSensorModel(sensorId);
+//     const SensorModel = getSensorModel(sensorId);
 
-    // Get data
-    const data = await SensorModel.find()
-      .sort({ Waktu: -1 })
-      .limit(parseInt(limit))
-      .lean();
+//     // Get data
+//     const data = await SensorModel.find()
+//       .sort({ Waktu: -1 })
+//       .limit(parseInt(limit))
+//       .lean();
 
-    if (!data || data.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: `No data found for sensor ${sensorId}`
-      });
-    }
+//     if (!data || data.length === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: `No data found for sensor ${sensorId}`
+//       });
+//     }
 
-    // Get statistics
-    const latest = data[0];
-    const oldest = data[data.length - 1];
+//     // Get statistics
+//     const latest = data[0];
+//     const oldest = data[data.length - 1];
 
-    res.json({
-      success: true,
-      data: {
-        sensorId,
-        records: data.length,
-        latest: {
-          temperature: latest.Suhu,
-          humidity: latest.Kelembapan,
-          timestamp: latest.Waktu
-        },
-        history: data.map(item => ({
-          temperature: item.Suhu,
-          humidity: item.Kelembapan,
-          timestamp: item.Waktu
-        })),
-        timeRange: {
-          from: oldest.Waktu,
-          to: latest.Waktu
-        }
-      }
-    });
+//     res.json({
+//       success: true,
+//       data: {
+//         sensorId,
+//         records: data.length,
+//         latest: {
+//           temperature: latest.Suhu,
+//           humidity: latest.Kelembapan,
+//           timestamp: latest.Waktu
+//         },
+//         history: data.map(item => ({
+//           temperature: item.Suhu,
+//           humidity: item.Kelembapan,
+//           timestamp: item.Waktu
+//         })),
+//         timeRange: {
+//           from: oldest.Waktu,
+//           to: latest.Waktu
+//         }
+//       }
+//     });
 
-  } catch (error) {
-    console.error(`❌ Error fetching data for sensor ${req.params.sensorId}:`, error);
+//   } catch (error) {
+//     console.error(`❌ Error fetching data for sensor ${req.params.sensorId}:`, error);
 
-    if (error.message.includes('collection') || error.message.includes('model')) {
-      return res.status(404).json({
-        success: false,
-        message: `Sensor ${req.params.sensorId} not found`
-      });
-    }
+//     if (error.message.includes('collection') || error.message.includes('model')) {
+//       return res.status(404).json({
+//         success: false,
+//         message: `Sensor ${req.params.sensorId} not found`
+//       });
+//     }
 
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching sensor data',
-      error: error.message
-    });
-  }
-});
+//     res.status(500).json({
+//       success: false,
+//       message: 'Error fetching sensor data',
+//       error: error.message
+//     });
+//   }
+// });
 
 startOfflineChecker();
 // ==================== START SERVER ====================

@@ -2,9 +2,9 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 
 // Import semua model yang punya kaitan dengan ID Alat
-const Device = require('./models/device');
-const Site = require('./models/siteModel');
-const Notification = require('./models/notificationModel');
+const Device = require('../models/device');
+const Site = require('../models/siteModel');
+const Notification = require('../models/notificationModel');
 
 async function jalankanMigrasi() {
     try {

@@ -22,11 +22,13 @@ const getAllowedDevicesIds = async (userId) => {
   
   return [...new Set(devicesIdsArray.map(id => id.toString()))];
 };
+
 // Get statistics for dashboard
 exports.getDashboardStats = async (req, res) => {
   try {
     const userId = req.user.userId;
     const user = await User.findById(userId);
+    const deviceIds = await getAllowedDevicesIds(userId);
     
     if (deviceIds.length === 0) {
         return res.json({
@@ -38,9 +40,6 @@ exports.getDashboardStats = async (req, res) => {
           }
         });
     }
-    // Get all user's device IDs
-    const deviceIds = user.devices.map(device => device.gatewayId);
-    
     // Get data for last 24 hours for all devices
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
