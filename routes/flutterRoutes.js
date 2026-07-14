@@ -449,7 +449,7 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
         
         console.log(`\n🗑️ [TEARDOWN] API Hit! Menghapus Node: ${targetMac} | Force: ${isForceDelete}`);
 
-        const node = await Node.findOne({$or: [{ nodeID: targetMac }, { serialID: targetMac }]}).populate('gateID gatewayId');
+        const node = await Node.findOne({$or: [{ nodeID: targetMac }, { serialID: targetMac }]}).populate('gateID');
 
         if (isForceDelete) {
             await Node.findOneAndDelete({$or: [{ nodeID: targetMac }, {serialID: targetMac }]});
@@ -462,7 +462,7 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
             return res.status(404).json({success: false, message: 'Node not found'});
         }
 
-        const gateway = node.gateID || node.gatewayId;
+        const gateway = node.gateID
         if (!gateway) {
             console.log(`❌ [TEARDOWN] Node kehilangan induk (Orphaned).`);
             return res.status(400).json({success: false, message: 'Node is orphaned, use force delete'});
