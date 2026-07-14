@@ -30,17 +30,6 @@ const isOnline = (date, maxMinutes = 5) => {
     return date && (new Date() - new Date(date)) <= maxMinutes * 60000;
 };
 
-// Merakit data Gateway beserta Node anaknya.
-//
-// CATATAN ARSITEKTUR:
-// - Node.gateID bertipe ObjectId (ref ke Gateway._id) — diisi oleh mqttHandler
-//   saat data MQTT masuk pertama kali dari node tersebut.
-// - Pencarian node menggunakan gwIds (ObjectId), bukan MAC string, karena
-//   tipe data di schema adalah ObjectId.
-// - site.devices bisa berisi MAC Gateway BARU (ada di Gateway model) maupun
-//   serialID Device LAMA (ada di Device model). Query Gateway menggunakan $in
-//   untuk mendukung keduanya — Device lama tidak punya dokumen di Gateway
-//   sehingga tidak muncul di list ini (by design, migrasi bertahap).
 const buildGatewayWithNodes = async (gateways) => {
     if (!gateways || gateways.length === 0) {
         console.log('  [buildGatewayWithNodes] Input kosong — return []');
@@ -361,32 +350,39 @@ router.post('/gateways/register', async (req, res) => {
             return res.status(400).json({ success: false, message: 'serialId and user_token required.' });
 
         const decoded = require('jsonwebtoken').verify(req.body.user_token, process.env.JWT_SECRET);
+        const targetMac = req.body.serialId.toUpperCase();
+
+        const existingGateway = await Gateway.findOne({ mac: targetMac });
+        if (existingGateway && existingGateway.status === 'active') {
+            return res.status(409).json({ success: false, message: 'Gateway is already claimed and active.' });
+        }
 
         let actualSiteObjectId = null;
         if (req.body.siteId) {
             const site = await Site.findById(req.body.siteId);
             if (site) {
                 actualSiteObjectId = site._id;
-                await Site.findByIdAndUpdate(site._id, {
-                    $addToSet: { devices: req.body.serialId.toUpperCase() }
-                });
+                // await Site.findByIdAndUpdate(site._id, {
+                //     $addToSet: { devices: targetMac }
+                // });
             }
         }
 
         const gateway = await Gateway.findOneAndUpdate(
-            { mac: req.body.serialId.toUpperCase() },
+            { mac: targetMac },
             {
                 $set: {
-                    mac: req.body.serialId.toUpperCase(),
+                    mac: targetMac,
                     ownerId: decoded.userId,
                     ...(actualSiteObjectId && { siteId: actualSiteObjectId }),
-                    isOnline: true,
+                    status: 'pending_claim',
+                    isOnline: false,
                     lastSeen: new Date()
                 }
             },
             { upsert: true, new: true }
         );
-        res.json({ success: true, data: gateway });
+        res.json({ success: true, message: 'Gateway registered.', ata: gateway });
     } catch (error) {
         console.error("❌ Error register gateway:", error.message);
         res.status(500).json({ success: false, error: error.message });
@@ -483,7 +479,7 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
             status: 'pending_delete' 
         });
 
-        console.log(`📤 [TEARDOWN] Mengirim instruksi hapus node ke Gateway: ${gateway.mac}`);
+        console.log(`📤 [TEARDOWN] Sending delete instruction node to Gateway: ${gateway.mac}`);
         
         const isSent = mqttHandler.sendGatewayCommand(gateway.mac, 'delete_node', { 
             req_id: req_id, 
@@ -491,11 +487,11 @@ router.delete('/node/:serialId/delete', protect, apiLimiter, async (req, res) =>
         });
         
         if (!isSent) {
-            console.error(`❌ [TEARDOWN] GAGAL KIRIM MQTT Node!`);
-            return res.status(503).json({success: false, message: 'Backend tidak terkoneksi ke MQTT.'});
+            console.error(`❌ [TEARDOWN] FAILED SENDING MQTT Node!`);
+            return res.status(503).json({success: false, message: 'Backend disconnected to MQTT.'});
         }
 
-        console.log(`✅ [TEARDOWN] Perintah MQTT (Node) berhasil meluncur!`);
+        console.log(`✅ [TEARDOWN] MQTT Command (Node) executed successfully!`);
         res.status(202).json({status: 'processing', req_id});
     } catch (error) {
         console.error(`🔥 [TEARDOWN FATAL ERROR]:`, error);
@@ -513,12 +509,12 @@ router.post('/nodes/delete-batch', protect, apiLimiter, async (req, res) => {
         if (!gateway_mac || !Array.isArray(node_macs) || node_macs.length === 0) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Format payload tidak valid. Pastikan gateway_mac dan node_macs (sebagai array) tersedia.' 
+                message: 'Payload format not valid. Make sure the gateway_mac dan node_macs (as array) tersedia.' 
             });
         }
 
         const targetGateway = gateway_mac.toUpperCase();
-        console.log(`\n🗑️ [TEARDOWN BATCH] API Hit! Inisialisasi antrean untuk ${node_macs.length} Node pada Gateway: ${targetGateway}`);
+        console.log(`\n🗑️ [TEARDOWN BATCH] API Hit! Initializing qeueu for ${node_macs.length} nodes on Gateway: ${targetGateway}`);
 
         // 1. Merakit array data pelacakan dengan status awal pending_delete
         const transactions = node_macs.map(mac => ({
@@ -531,7 +527,7 @@ router.post('/nodes/delete-batch', protect, apiLimiter, async (req, res) => {
 
         // 2. Menyuntikkan seluruh entitas ke MongoDB secara serentak (Tanpa for/while MQTT)
         await Transaction.insertMany(transactions);
-        console.log(`✅ [TEARDOWN BATCH] ${transactions.length} entitas disuntikkan ke antrean MongoDB.`);
+        console.log(`✅ [TEARDOWN BATCH] ${transactions.length} entitas is injected into the MongoDB qeueu.`);
 
         // 3. Memanggil Trigger Engine untuk mengeksekusi antrean urutan pertama
         mqttHandler.processNextDeletion(targetGateway);
@@ -540,7 +536,8 @@ router.post('/nodes/delete-batch', protect, apiLimiter, async (req, res) => {
         res.status(202).json({
             success: true,
             status: 'processing_batch',
-            message: `Penghapusan ${node_macs.length} node sedang diorkestrasi di latar belakang.`
+            jobs: transactions.map(t => ({ nodeMac: t.node_mac, reqId: t.req_id})),
+            message: `The deletion of ${node_macs.length} nodes is being orchestrated in the background.`
         });
 
     } catch (error) {

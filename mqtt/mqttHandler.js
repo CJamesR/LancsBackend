@@ -227,9 +227,9 @@ async handleGatewayRegister(data) {
         await Node.findOneAndDelete({ $or: [{ nodeID: trx.node_mac }, { serialId: trx.node_mac }] });
         
         // Memutasi status transaksi menjadi 'deleted' sesuai spesifikasi protokol resolusi asinkron
-        trx.status = 'deleted';
+        trx.status = 'completed';
         await trx.save();
-        console.log(`✅ [TEARDOWN] Resolusi Asinkron: Siklus hidup Node ${trx.node_mac} diakhiri dan status diubah menjadi deleted.`);
+        console.log(`✅ [TEARDOWN] Resolusi Asinkron: Siklus hidup Node ${trx.node_mac} diakhiri dan status diubah menjadi completed.`);
         await this.processNextDeletion(gateway_mac || trx.gateway_mac);
       }
       
