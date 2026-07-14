@@ -12,7 +12,7 @@ const transactionSchema = new mongoose.Schema({
     },
     node_mac:{
         type: String,
-        required: true
+        required: false
     },
     type: { 
         type: String, 
