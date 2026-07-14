@@ -10,6 +10,14 @@ const transactionSchema = new mongoose.Schema({
         type: String, 
         required: true
     },
+    gateway_mac:{
+        type: String,
+        required: true
+    },
+    node_mac:{
+        type: String,
+        required: true
+    },
     type: { 
         type: String, 
         enum: ['gateway', 'node'], 
