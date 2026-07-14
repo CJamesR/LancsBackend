@@ -22,7 +22,6 @@ const checksumValidator = require("./middleware/checksumValidator");
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const sensorRoutes = require("./routes/sensorRoutes");
-const deviceRoutes = require('./routes/deviceRoutes');
 const flutterRoutes = require('./routes/flutterRoutes'); //
 const databaseRoutes = require('./routes/databaseRoutes');
 const sensorController = require("./controllers/sensorController");
@@ -90,7 +89,7 @@ app.use("/api", limiter)
 app.use(morgan('dev'))
 app.use("/api/user", userRoutes);
 // app.use('/api/sensors', sensorRoutes);
-app.use("/api/devices", deviceRoutes);
+// app.use("/api/devices", deviceRoutes);
 app.use('/api/database', databaseRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/nfc', nfcRoutes);
