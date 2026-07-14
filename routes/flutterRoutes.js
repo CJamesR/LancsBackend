@@ -421,7 +421,7 @@ router.delete('/gateway/:mac/delete', protect, apiLimiter, async (req, res) => {
 
         const req_id = crypto.randomUUID();
         console.log(`⏳ [TEARDOWN] Membuat Transaksi ID: ${req_id}`);
-        await Transaction.create({ req_id, target_mac: targetMac, type: 'gateway', status: 'pending' });
+        await Transaction.create({ req_id, gateway_mac: targetMac, type: 'gateway', status: 'pending' });
 
         console.log(`📤 [TEARDOWN] Mencoba mengirim MQTT ke topik: LancsSK/gateway/cmd/${targetMac}`);
         const isSent = mqttHandler.sendGatewayCommand(targetMac, 'delete_gateway', { req_id });
