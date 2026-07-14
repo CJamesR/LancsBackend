@@ -210,7 +210,7 @@ async handleGatewayRegister(data) {
           }
           console.log(`✅ [TEARDOWN] Gateway ${gateway_mac} berhasil di-reset manual dan dihapus dari akun.`);
         }
-        return; // HENTIKAN EKSEKUSI. Jangan terus mencari transaksi di bawahnya.
+        return; 
       }
       // ----------------------------------------------
 
