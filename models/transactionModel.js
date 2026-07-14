@@ -6,10 +6,6 @@ const transactionSchema = new mongoose.Schema({
         required: true, 
         unique: true 
     },
-    target_mac: { 
-        type: String, 
-        required: true
-    },
     gateway_mac:{
         type: String,
         required: true
