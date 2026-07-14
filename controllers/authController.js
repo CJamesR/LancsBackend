@@ -128,7 +128,7 @@ exports.register = async (req, res) => {
     const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify-email/${verifyToken}`;
 
     const mailOptions = {
-      from: '"Lancs IoT" <iot.ptlancs.com>',
+      from: '"Lancs IoT" <iot@ptlancs.com>',
       to: user.email,
       subject: 'Lancs IoT Account Verification',
       html: `
@@ -543,7 +543,7 @@ exports.forgotPassword = async (req, res) => {
         const resetUrl = `lancsapp://reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
 
         const mailOptions = {
-          from: '"Lancs IoT Security" <iot.ptlancs.com>',
+          from: '"Lancs IoT Security" <iot@ptlancs.com>',
           to: user.email,
           subject: 'Instruksi Reset Password - Lancs IoT',
           html: `
