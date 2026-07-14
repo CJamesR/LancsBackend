@@ -191,19 +191,28 @@ async handleGatewayRegister(data) {
     console.log(`\n📥 [MQTT IN] Konfirmasi Teardown Diterima: ${status} | ReqID: ${req_id}`);
 
     try {
+      // --- LOGIKA BYPASS UNTUK TOMBOL RESET FISIK ---
       if (req_id === 'MANUAL_BTN_RESET') {
         if (gateway_mac) {
+          console.log(`⏳ [TEARDOWN] Bypass validasi transaksi. Mengeksekusi Hard Delete untuk Gateway ${gateway_mac}...`);
+          
+          // 1. Eksekusi Hard Delete secara langsung tanpa mencari Transaction
           const gateway = await Gateway.findOneAndDelete({ mac: gateway_mac.toUpperCase() });
+          
           if (gateway) {
+            // Bersihkan node yang yatim
             await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
+            
+            // Lepaskan dari daftar device pada Site
             if (gateway.siteId) {
               await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: gateway_mac.toUpperCase() } });
             }
           }
-          console.log(`✅ [TEARDOWN] Gateway ${gateway_mac} berhasil di-reset manual.`);
+          console.log(`✅ [TEARDOWN] Gateway ${gateway_mac} berhasil di-reset manual dan dihapus dari akun.`);
         }
-        return; 
+        return; // HENTIKAN EKSEKUSI. Jangan terus mencari transaksi di bawahnya.
       }
+      // ----------------------------------------------
 
       // Mencari transaksi yang terkait dengan req_id
       const trx = await Transaction.findOne({ req_id });
