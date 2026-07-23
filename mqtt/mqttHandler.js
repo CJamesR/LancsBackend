@@ -186,41 +186,47 @@ async handleGatewayRegister(data) {
   }
 
   async handleTeardownAck(data) {
-    // Mengekstrak parameter dari payload balasan perangkat keras
-    const { status, req_id, gateway_mac, node_mac } = data; 
+    // Mengekstrak parameter dari payload balasan perangkat keras, tambahkan 'mac' sebagai cadangan
+    const { status, req_id, gateway_mac, node_mac, mac } = data; 
     console.log(`\n📥 [MQTT IN] Konfirmasi Teardown Diterima: ${status} | ReqID: ${req_id}`);
+    
+    // Cetak payload asli untuk melihat apa yang sebenarnya dikirim hardware
+    console.log(`📦 [DEBUG] Payload perangkat keras:`, JSON.stringify(data)); 
 
     try {
       // --- LOGIKA BYPASS UNTUK TOMBOL RESET FISIK ---
       if (req_id === 'MANUAL_BTN_RESET') {
-        if (gateway_mac) {
-          console.log(`⏳ [TEARDOWN] Bypass validasi transaksi. Mengeksekusi Hard Delete untuk Gateway ${gateway_mac}...`);
-          
-          // 1. Eksekusi Hard Delete secara langsung tanpa mencari Transaction
-          const gateway = await Gateway.findOneAndDelete({ mac: gateway_mac.toUpperCase() });
-          
-          if (gateway) {
-            // Bersihkan node yang yatim
-            await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
-            
-            // Lepaskan dari daftar device pada Site
-            if (gateway.siteId) {
-              await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: gateway_mac.toUpperCase() } });
-            }
-          }
-          console.log(`✅ [TEARDOWN] Gateway ${gateway_mac} berhasil di-reset manual dan dihapus dari akun.`);
+        
+        // Coba gunakan gateway_mac, jika kosong, coba cari dari variabel 'mac'
+        const targetMac = gateway_mac || mac;
+
+        if (!targetMac) {
+             console.error(`❌ [FATAL] Gagal reset manual! Hardware Gateway TIDAK mengirimkan data 'gateway_mac' pada payload JSON-nya.`);
+             console.error(`Tolong perbaiki program C++/Arduino di Gateway untuk menyertakan "gateway_mac": "MAC_ADDRESS" saat menekan tombol reset.`);
+             return; // Hentikan proses
         }
+
+        console.log(`⏳ [TEARDOWN] Bypass validasi transaksi. Mengeksekusi Hard Delete untuk Gateway ${targetMac}...`);
+        
+        const gateway = await Gateway.findOneAndDelete({ mac: targetMac.toUpperCase() });
+        
+        if (gateway) {
+          await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
+          if (gateway.siteId) {
+            await Site.findByIdAndUpdate(gateway.siteId, { $pull: { devices: targetMac.toUpperCase() } });
+          }
+        }
+        console.log(`✅ [TEARDOWN] Gateway ${targetMac} berhasil di-reset manual dan dihapus dari akun.`);
+        
         return; 
       }
       // ----------------------------------------------
 
-      // Mencari transaksi yang terkait dengan req_id
+      // Mencari transaksi yang terkait dengan req_id (Logika Normal Aplikasi)
       const trx = await Transaction.findOne({ req_id });
-      // Evaluasi apakah status mencakup instruksi pending_delete
       if (!trx || (!trx.status.includes('pending'))) return;
 
       if (status === 'deleted_gw' && trx.type === 'gateway') {
-        // (Logika eksisting untuk Gateway - akan diperbarui di part selanjutnya jika diperlukan)
         const gateway = await Gateway.findOneAndDelete({ mac: trx.gateway_mac });
         if (gateway) {
           await Node.deleteMany({ $or: [{ gateID: gateway._id }, { gatewayId: gateway._id }] });
@@ -232,13 +238,10 @@ async handleGatewayRegister(data) {
         await trx.save();
       } 
       else if (status === 'deleted_node' && trx.type === 'node') {
-        // Mutasi pangkalan data untuk mengakhiri siklus hidup Node (menghapus entri Node)
         await Node.findOneAndDelete({ $or: [{ nodeID: trx.node_mac }, { serialId: trx.node_mac }] });
-        
-        // Memutasi status transaksi menjadi 'deleted' sesuai spesifikasi protokol resolusi asinkron
         trx.status = 'completed';
         await trx.save();
-        console.log(`✅ [TEARDOWN] Resolusi Asinkron: Siklus hidup Node ${trx.node_mac} diakhiri dan status diubah menjadi completed.`);
+        console.log(`✅ [TEARDOWN] Resolusi Asinkron: Siklus hidup Node ${trx.node_mac} diakhiri.`);
         await this.processNextDeletion(gateway_mac || trx.gateway_mac);
       }
       
