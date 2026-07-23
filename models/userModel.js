@@ -63,6 +63,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  lastVerificationSentAt:{
+    type: Date,
+    default: null
+  },
   subscription: {
     plan: { type: String, enum: ['free', 'basic', 'pro'], default: 'free' },
     maxGateways: { type: Number, default: 10 },

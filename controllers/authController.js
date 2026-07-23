@@ -80,7 +80,8 @@ exports.register = async (req, res) => {
       isActive: true,
       isVerified: false,
       verificationToken: verifyTokenHash,
-      verificationTokenExpires: Date.now() + 10 * 60 * 1000 // Token valid for 15 minutes 
+      verificationTokenExpires: Date.now() + 10 * 60 * 1000, // Token valid for 15 minutes
+      lastVerificationSentAt: Date.now()
     });
 
     console.log('✅ User created:', user.email);
@@ -146,7 +147,8 @@ exports.register = async (req, res) => {
       console.log('📧 Verification email sent via Brevo to:', user.email);
       res.status(201).json({
         success: true,
-        message: 'User has been created. Please check your email.'
+        message: 'User has been created. Please check your email.',
+        nextResendAt: new Date(Date.now() + 60 * 1000).toISOString()
       });
     } catch (emailError) {
       console.error('❌ Gagal kirim email Brevo:', emailError);
@@ -227,63 +229,6 @@ exports.login = async (req, res) => {
         message: 'Email has not been verified. Please check your email for verification.'
       });
     }
-
-    // // ====================================================================
-    // // LOGIKA DEVICE FINGERPRINTING & OTP
-    // // ====================================================================
-    // const currentTime = new Date();
-    // const isFirstLogin = !user.trustedDevices || user.trustedDevices.length === 0;
-    
-    // let isDeviceTrusted = false;
-
-    // if (isFirstLogin) {
-    //   // Auto-trust untuk login pertama
-    //   isDeviceTrusted = true;
-    //   const expiry = new Date(currentTime.getTime() + 30 * 24 * 60 * 60 * 1000); // Masa aktif 30 Hari
-    //   await User.updateOne(
-    //     { _id: user._id }, 
-    //     { $push: { trustedDevices: { deviceId: deviceId, expiresAt: expiry } } }
-    //   );
-    // } else {
-    //   // Cek apakah deviceId ini ada di daftar dan belum kedaluwarsa
-    //   const knownDevice = user.trustedDevices.find(d => d.deviceId === deviceId && d.expiresAt > currentTime);
-    //   if (knownDevice) isDeviceTrusted = true;
-    // }
-
-    // if (!isDeviceTrusted) {
-    //   // 🚨 PERANGKAT BARU / SESI HABIS -> KIRIM OTP VIA BREVO
-    //   const generatedOtp = crypto.randomInt(100000, 999999).toString();
-      
-    //   await User.updateOne({ _id: user._id }, {
-    //     otpCode: generatedOtp,
-    //     otpExpires: new Date(currentTime.getTime() + 10 * 60000) // OTP hangus dalam 10 menit
-    //   });
-
-    //   const mailOptions = {
-    //     from: '"Lancs IoT Security" <calvinriyono@gmail.com>',
-    //     to: user.email,
-    //     subject: 'Kode OTP Login Anda',
-    //     html: `
-    //       <div style="font-family: sans-serif; text-align: center;">
-    //         <h2>Verifikasi Perangkat Baru</h2>
-    //         <p>Kami mendeteksi upaya login dari perangkat yang belum dikenali.</p>
-    //         <h1 style="letter-spacing: 5px; color: #4CAF50;">${generatedOtp}</h1>
-    //         <p>Masukkan kode OTP 6 digit ini di aplikasi. Kode berlaku selama 10 menit.</p>
-    //       </div>
-    //     `
-    //   };
-
-    //   await transporter.sendMail(mailOptions);
-    //   console.log(`📧 OTP Email terkirim via Brevo ke: ${user.email}`);
-
-    //   // Status 206 memberitahu Flutter untuk pindah ke layar input OTP
-    //   return res.status(206).json({ 
-    //     success: true, 
-    //     requires_otp: true, 
-    //     message: "New device detected. OTP has been sent to your email." 
-    //   });
-    // }
-
     const token = generateToken(user._id, user.role);
     const username = user.username || user.email.split('@')[0] || 'User';
 
@@ -811,6 +756,80 @@ exports.verifyResetToken = async (req, res) => {
   } catch (error) {
     console.error('🔥 Error Verify Reset Token:', error);
     res.status(500).send('Error processing verification');
+  }
+};
+
+// @desc    Resend Verification Email
+// @route   POST /api/auth/resend-verification
+// @access  Public
+exports.resendVerificationEmail = async (req, res) => {
+  try {
+    const {email} = req.body;
+    const RESEND_COOLDOWN_MS = 60 * 1000;
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await User.findOne({email: cleanEmail});
+
+    if (!user) {
+      return res.json({
+        success: true,
+        message: "If an account exists, a verification email has been sent",
+        nextResendAt: new Date(Date.now() + RESEND_COOLDOWN_MS).toISOString()
+      });
+    }
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email has already been verified'
+      });
+    }
+    const now = Date.now();
+    const lastSent = user.lastVerificationSentAt ? new Date(user.lastVerificationSentAt).getTime() : 0;
+    const elapsed = now - lastSent;
+
+    if (elapsed < RESEND_COOLDOWN_MS) {
+      return res.status(429).json({
+        success: false,
+        message: `Please wait ${Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000)}s before trying again.`,
+        nextResendAt: new Date(lastSent + RESEND_COOLDOWN_MS).toISOString()
+      });
+    }
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    const verifyTokenHash = crypto.createHash('sha256').update(verifyToken).digest('hex');
+
+    user.verificationToken = verifyTokenHash;
+    user.verificationTokenExpires = Date.now() + 10 * 60 * 1000;
+    user.lastVerificationSentAt = new Date(now);
+    await user.save();
+
+    const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify-email/${verifyToken}`;
+
+    const mailOptions = {
+            from: `"Lancs IoT" <${process.env.SMTP_SENDER_EMAIL}>`,
+            to: user.email,
+            subject: 'Lancs IoT Account Verification (Resend)',
+            html: `
+              <div style="font-family: sans-serif; text-align: center;">
+                <h2>Welcome back, ${user.username}!</h2>
+                <p>You requested a new verification link. Click the button below to activate your account:</p>
+                <a href="${verifyUrl}" style="background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block;">Verify Account</a>
+                <p style="margin-top: 20px; font-size: 12px; color: #888;">This link is valid for 10 minutes.</p>
+              </div>
+            `
+    };
+    await transporter.sendMail(mailOptions);
+    console.log('📧 Verification email resent via Brevo to:', user.email);
+    res.json({
+      success: true,
+      message: 'Verification email has been resent. Please check your inbox.',
+      nextResendAt: new Date(Date.now() + RESEND_COOLDOWN_MS).toISOString()
+    });
+  } catch (error) {
+    console.error('🔥 RESEND VERIFICATION EMAIL Error:', error.message);
+    res.status(500).json({success: false, message: "Something wrong. Please try again later."});
   }
 };
 
