@@ -59,20 +59,7 @@ exports.register = async (req, res) => {
         message: 'Email have been used'
       });
     }
-
-    let existingUser = await User.findOne({ email: cleanEmail });
-
-    if (existingUser) {
-      if (existingUser.isVerified) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email has already been registered and verified. Please log in.'
-        });
-      } else {
-        console.log('❌ Attempt to register with unverified email:', cleanEmail);
-        await User.findByIdAndDelete({email: cleanEmail});
-      }
-    }
+    
     const usernameExists = await User.findOne({ username });
     if (usernameExists) {
       return res.status(400).json({
