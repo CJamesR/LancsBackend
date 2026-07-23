@@ -808,7 +808,7 @@ exports.resendVerificationEmail = async (req, res) => {
     const verifyUrl = `${req.protocol}://${req.get('host')}/api/auth/verify-email/${verifyToken}`;
 
     const mailOptions = {
-            from: `"Lancs IoT" <${process.env.SMTP_SENDER_EMAIL}>`,
+            from: `"Lancs IoT" <iot@ptlancs.com>`,
             to: user.email,
             subject: 'Lancs IoT Account Verification (Resend)',
             html: `
