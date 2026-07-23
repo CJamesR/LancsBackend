@@ -40,21 +40,24 @@ const admin = require("firebase-admin");
 const path = require("path");
 const serviceAccount = require("./config/serviceAccountKey.json");
 try {
-  // Gunakan path.join dan __dirname agar jalurnya absolut dan terkunci
   const serviceAccountPath = path.join(__dirname, 'config', 'serviceAccountKey.json');
   const serviceAccount = require(serviceAccountPath);
   
-  // Pastikan aplikasi belum diinisialisasi sebelumnya untuk mencegah bentrok
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log("🔥 Firebase Admin SDK (FCM) berhasil diinisialisasi.");
-  }
+  // Langsung inisialisasi tanpa mengecek .length
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  console.log("🔥 Firebase Admin SDK (FCM) berhasil diinisialisasi.");
+  
 } catch (error) {
-  // Cetak error bawaan Node.js untuk memudahkan debugging
-  console.error("❌ Gagal inisialisasi Firebase (FCM). Detail Error Asli:");
-  console.error(error.message);
+  // Jika Firebase memprotes karena sudah pernah diinisialisasi, kita abaikan saja
+  if (error.code === 'app/duplicate-app') {
+    console.log("🔥 Firebase Admin SDK (FCM) sudah berjalan di latar belakang.");
+  } else {
+    // Cetak error lain jika memang ada masalah krusial
+    console.error("❌ Gagal inisialisasi Firebase (FCM). Detail Error Asli:");
+    console.error(error.message);
+  }
 }
 
 const app = express();
