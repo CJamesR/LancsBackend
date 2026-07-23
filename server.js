@@ -35,20 +35,26 @@ const notificationRoutes = require('./routes/notificationRoutes');
 // Additional Imports
 const mongoose = require('mongoose');
 const getSensorModel = require('./models/sensorModel');
-// 🔥 TAMBAHAN UNTUK FCM PUSH NOTIFICATION
+
 const admin = require("firebase-admin");
+const path = require("path");
 const serviceAccount = require("./config/serviceAccountKey.json");
 try {
-  // Pastikan Anda sudah mengunduh Service Account Key dari Firebase Console
-  // dan meletakkannya di folder config/ dengan nama serviceAccountKey.json
-  const serviceAccount = require("./config/serviceAccountKey.json");
+  // Gunakan path.join dan __dirname agar jalurnya absolut dan terkunci
+  const serviceAccountPath = path.join(__dirname, 'config', 'serviceAccountKey.json');
+  const serviceAccount = require(serviceAccountPath);
   
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
-  console.log("🔥 Firebase Admin SDK (FCM) berhasil diinisialisasi.");
+  // Pastikan aplikasi belum diinisialisasi sebelumnya untuk mencegah bentrok
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("🔥 Firebase Admin SDK (FCM) berhasil diinisialisasi.");
+  }
 } catch (error) {
-  console.warn("⚠️ Peringatan: Gagal inisialisasi Firebase (FCM). Pastikan file config/serviceAccountKey.json tersedia.");
+  // Cetak error bawaan Node.js untuk memudahkan debugging
+  console.error("❌ Gagal inisialisasi Firebase (FCM). Detail Error Asli:");
+  console.error(error.message);
 }
 
 const app = express();
