@@ -14,7 +14,6 @@ router.get('/verify-email/:token', authController.verifyEmail);
 router.post('/logout', protect, authController.logout);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
-router.post('/resend-verification', resendLimiter, authController.resendVerificationEmail);
 router.get('/verify-reset/:token', authController.verifyResetToken);
 
 // Protected routes
@@ -31,4 +30,5 @@ const resendLimiter = rateLimit({
     }
 });
 
+router.post('/resend-verification', resendLimiter, authController.resendVerificationEmail);
 module.exports = router;
