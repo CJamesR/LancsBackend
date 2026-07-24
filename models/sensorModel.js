@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 
-// Function untuk mendapatkan model berdasarkan sensorID
 const getSensorModel = (sensorID) => {
   const collectionName = `sensor_${sensorID.replace(/[^a-zA-Z0-9]/g, '_')}`;
   
@@ -77,4 +76,4 @@ const scanSensorCollections = async () => {
 };
 
 module.exports = getSensorModel;
-module.exports.scanSensorCollections = scanSensorCollections; // Export new function
+module.exports.scanSensorCollections = scanSensorCollections;

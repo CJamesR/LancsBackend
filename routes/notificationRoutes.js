@@ -34,7 +34,8 @@ router.get('/:siteId', protect, async (req, res) => {
         // 2. Ambil data notifikasi (Max 50 terbaru agar aplikasi tidak lemot)
         const notifications = await Notification.find({ siteId: siteId })
             .sort({ createdAt: -1 }) // -1 artinya urutkan dari yang paling baru
-            .limit(50);
+            .limit(50)
+            .lean();
 
         // 3. Hitung berapa notifikasi yang belum dibaca (badge merah di Flutter)
         const unreadCount = await Notification.countDocuments({ siteId: siteId, isRead: false });

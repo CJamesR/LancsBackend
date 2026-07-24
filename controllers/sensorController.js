@@ -152,7 +152,8 @@ exports.getSensorData = async (req, res) => {
 
     const data = await SensorModel.find()
       .sort({ Waktu: -1 })
-      .limit(100); // Limit to 100 records
+      .limit(100)
+      .lean(); // Limit to 100 records
 
     const formattedData = data.map(item => ({
       ...item._doc,

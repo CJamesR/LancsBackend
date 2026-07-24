@@ -12,7 +12,6 @@ const deviceSchema = new mongoose.Schema({
     lastActive: {type: Date, default: null},
     isOnline: {type: Boolean, default: false}},
 {
-    // Bonus: Otomatis mencatat 'createdAt' dan 'updatedAt'
     timestamps: true 
 });
 

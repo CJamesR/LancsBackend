@@ -11,7 +11,7 @@ const Notification = require('../models/notificationModel');
 // @access  Private/Admin
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select('-password -refreshToken');
+    const users = await User.find().select('-password -refreshToken').lean();
     
     res.json({
       success: true,
@@ -77,7 +77,7 @@ exports.updateProfile = async (req, res) => {
 // @access  Private
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password -refreshToken');
+    const user = await User.findById(req.user.userId).select('-password -refreshToken').lean();
 
     if (!user) {
       return res.status(404).json({

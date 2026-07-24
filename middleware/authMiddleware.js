@@ -52,7 +52,6 @@ exports.restrictTo = (...roles) => {
 exports.checkSiteRole = (allowedRoles) => {
   return async (req, res, next) => {
       try {
-          // 🔥 PERBAIKAN: Ambil siteId dari URL Params ATAU dari Body JSON
           const siteId = req.params.siteId || req.body.siteId;
           const userId = req.user?.userId || req.user?._id;
 
@@ -62,22 +61,25 @@ exports.checkSiteRole = (allowedRoles) => {
           if (!site) return res.status(404).json({ success: false, message: "Site not found." });
 
           const isOwner = site.ownerId.toString() === userId.toString();
-          
           const memberRecord = site.members?.find(m => m.userId.toString() === userId.toString());
           const userRole = isOwner ? 'owner' : (memberRecord ? memberRecord.role : null);
 
           // 1. Owner selalu diizinkan masuk
-          if (isOwner) return next();
+          if (isOwner) {
+            req.siteData = site;
+            return next();}
 
           // 2. Cek Role Member
           if (userRole && allowedRoles.includes(userRole)) {
-              return next();
+            req.siteData = site;
+            return next();
           }
 
           // 3. Fallback: Cek di sistem Admin lama
           const isAdminLama = site.admins.some(a => a.userId.toString() === userId.toString());
           if (isAdminLama && allowedRoles.includes('admin')) {
-              return next();
+            req.siteData = site;
+            return next();
           }
 
           return res.status(403).json({ 

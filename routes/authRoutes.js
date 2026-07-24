@@ -13,7 +13,6 @@ const resendLimiter = rateLimit({
     }
 });
 
-// Public routes
 router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.post('/google', authController.googleSignIn);
@@ -30,8 +29,5 @@ router.get('/verify-reset/:token', authController.verifyResetToken);
 router.post('/profile', protect, authController.getProfile);
 router.post('/profile/update', protect, authController.updateProfile);
 router.put('/change-password', protect, authController.changePassword);
-
-
-
 
 module.exports = router;

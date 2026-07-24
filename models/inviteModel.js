@@ -8,7 +8,7 @@ const inviteSchema = new mongoose.Schema({
     role: { type: String, enum: ['admin', 'member'], default: 'member' },
     status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
 }, { 
-    timestamps: true // Otomatis bikin createdAt (Waktu kirim)
+    timestamps: true
 });
 
 module.exports = mongoose.model('Invite', inviteSchema);

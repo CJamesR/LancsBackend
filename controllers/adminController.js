@@ -3,8 +3,7 @@ const User = require('../models/userModel');
 // Get All Users (Admin only)
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({}, '-password -__v')
-      .sort({ createdAt: -1 });
+    const users = await User.find({}, '-password -__v').sort({ createdAt: -1 }).lean();
     
     res.json({
       total: users.length,
@@ -23,7 +22,7 @@ exports.getAllUsers = async (req, res) => {
 // Get User by ID
 exports.getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id, '-password -__v');
+    const user = await User.findById(req.params.id, '-password -__v').lean();
     
     if (!user) {
       return res.status(404).json({ 
@@ -48,7 +47,7 @@ exports.updateUser = async (req, res) => {
     const { role, isActive, sensorAccess } = req.body;
     const userId = req.params.id;
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).lean();
     
     if (!user) {
       return res.status(404).json({ 

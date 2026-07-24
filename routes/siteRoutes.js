@@ -85,31 +85,37 @@ router.patch('/:siteId', protect, checkSiteRole(['owner']), async (req, res) => 
     }
 });
 
-// LEAVE SITE (member/admin keluar sendiri)
+// LEAVE SITE (member/admin keluar sendiri) - Optimized
 // DELETE /api/sites/:siteId/leave
 router.delete('/:siteId/leave', protect, async (req, res) => {
     try {
         const userId = extractUserId(req);
         const siteId = req.params.siteId;
 
-        const site = await Site.findById(siteId);
+        const site = await Site.findById(siteId).select('ownerId');
         if (!site) return res.status(404).json({ success: false, message: 'Site not found' });
-        
+
         if (site.ownerId.toString() === userId) {
-            return res.status(400).json({ success: false, message: 'Owner cannot leave the site. Please delete the site or transfer ownership.' });
+            return res.status(400).json({
+                success: false,
+                message: 'Owner cannot leave the site. Please delete the site or transfer ownership.'
+            })
         }
 
-        site.admins = site.admins.filter(a => a.userId.toString() !== userId);
-        site.members = (site.members || []).filter(m => m.userId.toString() !== userId);
-        await site.save();
-
-        // 🔥 CATAT AKTIVITAS
+        await Site.updateOne(
+            {_id: siteId},
+            {
+                $pull: {
+                    admins: { userId: userId },
+                    members: { userId: userId }
+                }
+            }
+        );
         await ActivityLog.create({
             userId: userId,
             siteId: siteId,
             action: `Left the site`
         });
-
         res.json({ success: true, message: 'Successfully left the site.' });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error' });
@@ -123,10 +129,12 @@ router.delete('/:siteId/devices/:deviceId', protect, checkSiteRole(['owner', 'ad
         const retainData = req.query.retainData !== 'false';
         const userId = extractUserId(req);
 
-        const site = await Site.findById(siteId);
+        const site = req.siteData;
         
         site.devices = site.devices.filter(id => id.toString() !== deviceId.toString());
-        site.admins.forEach(admin => { admin.allowedDevices = admin.allowedDevices.filter(id => id.toString() !== deviceId.toString()); });
+        site.admins.forEach(admin => { 
+            admin.allowedDevices = admin.allowedDevices.filter(id => id.toString() !== deviceId.toString()); 
+        });
         await site.save();
 
         const device = await Device.findOne({ serialID: deviceId });
@@ -134,10 +142,10 @@ router.delete('/:siteId/devices/:deviceId', protect, checkSiteRole(['owner', 'ad
         if (device) {
             deviceName = device.name || deviceId;
             device.isClaimed = false; device.siteId = null; device.devicePassword = null;
+            device.siteId = null;
+            device.devicePassword = null;
             await device.save();
         }
-
-        // 🔥 CATAT AKTIVITAS
         await ActivityLog.create({
             userId: userId,
             siteId: siteId,
@@ -148,12 +156,17 @@ router.delete('/:siteId/devices/:deviceId', protect, checkSiteRole(['owner', 'ad
         if (!retainData) {
             const mongoose = require('mongoose');
             const collectionName = `sensor_${deviceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            const collections = await mongoose.connection.db.listCollections({ name: collectionName }).toArray();
-            if (collections.length > 0) { await mongoose.connection.db.dropCollection(collectionName); dataWiped = true; }
+            try {
+                await mongoose.connection.db.dropCollection(collectionName);
+                dataWiped = true;
+            } catch (error) {
+                if (error.code !== 26) console.error("Drop collection error: ", error)
         }
+    }
 
         res.json({ success: true, message: `Alat ${deviceId} berhasil dicabut.`, dataWiped: dataWiped });
     } catch (error) {
+        console.error("Error removing device: ", error)
         res.status(500).json({ success: false, message: 'Server error.' });
     }
 });
@@ -170,21 +183,39 @@ router.delete('/:siteId', protect, checkSiteRole(['owner']), async (req, res) =>
         }
 
         if (site.devices && site.devices.length > 0) {
-            await Device.updateMany({ serialID: { $in: site.devices } }, { $set: { isClaimed: false, siteId: null, devicePassword: null } });
+            await Device.updateMany(
+                { serialID: { $in: site.devices } }, 
+                { $set: { isClaimed: false, siteId: null, devicePassword: null } });
         }
 
         let wipedCollections = 0;
         if (!retainData && site.devices && site.devices.length > 0) {
             const mongoose = require('mongoose');
-            for (const deviceId of site.devices) {
-                const collectionName = `sensor_${deviceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                const collections = await mongoose.connection.db.listCollections({ name: collectionName }).toArray();
-                if (collections.length > 0) { await mongoose.connection.db.dropCollection(collectionName); wipedCollections++; }
-            }
+            await Promise.all(site.devices.map(async deviceId => {
+                const collectioName = `sensor_${deviceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                try {
+                    await mongoose.connection.db.dropCollection(collectioName);
+                    wipedCollections++;
+                } catch (error) {
+                    if (error.codeName !== 26) {
+                        console.error(`Failed to delete collection ${collectioName}`, error);
+                    }
+                }
+            }));
         }
+        //     for (const deviceId of site.devices) {
+        //         const collectionName = `sensor_${deviceId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        //         const collections = await mongoose.connection.db.listCollections({ name: collectionName }).toArray();
+        //         if (collections.length > 0) { await mongoose.connection.db.dropCollection(collectionName); wipedCollections++; }
+        //     }
+        // }
 
         await Site.findByIdAndDelete(siteId);
-        res.json({ success: true, message: `Site ${site.name} successfully deleted permanently.`, devicesFreed: site.devices.length, wipedCollections });
+        res.json({ 
+            success: true, 
+            message: `Site ${site.name} successfully deleted permanently.`, 
+            devicesFreed: site.devices.length, 
+            wipedCollections });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error.' });
     }
@@ -240,4 +271,10 @@ router.get(
 
 // router.patch('/:siteId/nodes/:id/rename', protect, checkSiteRole(['owner', 'admin']), siteController.renameNode);
 
+// router.patch(
+//     '/:siteId/transfer-ownership', 
+//     protect, 
+//     checkSiteRole(['owner']), 
+//     siteController.transferOwnership
+// );
 module.exports = router;

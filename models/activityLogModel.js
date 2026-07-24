@@ -11,17 +11,15 @@ const activityLogSchema = new mongoose.Schema({
         ref: 'Site',
         required: true
     },
-    // Contoh action: "Menambahkan Node_1", "Mengubah nama Site", "Menghapus Admin"
     action: {
         type: String,
         required: true
     },
-    // Detail tambahan (opsional) jika ingin menyimpan data lebih lengkap
     details: {
         type: Object
     }
 }, {
-    timestamps: true // Otomatis membuat createdAt (sebagai timestamp aktivitas)
+    timestamps: true
 });
 
 module.exports = mongoose.model('ActivityLog', activityLogSchema);

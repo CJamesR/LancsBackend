@@ -269,7 +269,8 @@ exports.getSiteMembers = async (req, res) => {
             const logs = await ActivityLog.find({ siteId: siteId, userId: targetUserId })
                 .sort({ timestamp: -1 })
                 .limit(10) 
-                .select('action timestamp -_id'); 
+                .select('action timestamp -_id')
+                .lean(); 
             
             return logs.map(log => ({
                 action: log.action,
@@ -438,7 +439,7 @@ exports.getSiteNodes = async (req, res) => {
                 {gateID: null}
             ];
         }
-        const nodes = await Node.find(query).populate('gateID', 'name mac isOnline currentMode').sort({createdAt: -1});
+        const nodes = await Node.find(query).populate('gateID', 'name mac isOnline currentMode').sort({createdAt: -1}).lean();
 
         res.json({
             success: true,
@@ -496,3 +497,51 @@ exports.getSiteNodes = async (req, res) => {
 //         return res.status(500).json({success: false, message: "An error occurred while renaming the node.", error: error.message});
 //     }
 // }
+
+// exports.transferOwnership = async (req, res) => {
+//     try {
+//         const siteId = req.params.siteId;
+//         const { newOwnerId } = req.body;
+//         const currentOwnerId = req.user._id || req.user.userId || req.user.id;
+
+//         if (!newOwnerId) {
+//             return res.status(400).json({ success: false, message: "ID pengguna (newOwnerId) wajib disertakan." });
+//         }
+
+//         // 櫨 OPTIMASI: Ambil data site langsung dari memori req, HAPUS await Site.findById()
+//         const site = req.siteData; 
+
+//         // Sisa logika tetap sama persis
+//         if (site.ownerId.toString() !== currentOwnerId.toString()) {
+//             return res.status(403).json({ success: false, message: "Hanya owner yang dapat memindahtangankan site." });
+//         }
+
+//         if (site.ownerId.toString() === newOwnerId.toString()) {
+//             return res.status(400).json({ success: false, message: "Pengguna tersebut sudah menjadi owner dari site ini." });
+//         }
+
+//         const targetUser = await User.findById(newOwnerId);
+//         if (!targetUser) {
+//             return res.status(404).json({ success: false, message: "Pengguna target tidak ditemukan di dalam sistem." });
+//         }
+        
+//         site.admins = (site.admins || []).filter(a => a.userId.toString() !== newOwnerId.toString());
+//         site.members = (site.members || []).filter(m => m.userId.toString() !== newOwnerId.toString());
+
+//         site.admins.push({ userId: currentOwnerId, allowedDevices: site.devices || [] });
+//         site.ownerId = newOwnerId;
+
+//         await site.save();
+
+//         await ActivityLog.create({
+//             userId: currentOwnerId,
+//             siteId: siteId,
+//             action: `Transferred site ownership to ${targetUser.username || newOwnerId}`
+//         });
+
+//         return res.status(200).json({ success: true, message: "Kepemilikan berhasil dipindah.", data: site });
+
+//     } catch (error) {
+//         return res.status(500).json({ success: false, message: "Kesalahan server." });
+//     }
+// };

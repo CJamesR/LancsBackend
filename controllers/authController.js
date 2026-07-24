@@ -7,7 +7,6 @@ const nodemailer = require('nodemailer');
 const dns = require('dns').promises;
 const bcrypt = require('bcryptjs');
 
-// 🔥 TAMBAHAN IMPORT UNTUK FITUR KLAIM UNDANGAN SITE
 const PendingInvite = require('../models/pendingInviteModel');
 const Site = require('../models/siteModel');
 const ActivityLog = require('../models/activityLogModel');
@@ -17,7 +16,6 @@ const formatWIB = (date) => {
     return new Date(date).toLocaleString('sv-SE', { timeZone: 'Asia/Jakarta' });
 };
 
-// Generate JWT Token
 const generateToken = (userId, role) => {
   return jwt.sign(
     { userId, role },
@@ -35,7 +33,6 @@ const transporter = nodemailer.createTransport({
     pass: process.env.SMTP_PASS
   }
 });
-
 
 exports.register = async (req, res) => {
   try {
@@ -70,7 +67,6 @@ exports.register = async (req, res) => {
     const verifyToken = crypto.randomBytes(32).toString('hex');
     const verifyTokenHash = crypto.createHash('sha256').update(verifyToken).digest('hex');
     
-    // Create user
     const user = await User.create({
       email,
       password,
@@ -112,7 +108,6 @@ exports.register = async (req, res) => {
         }
         await PendingInvite.deleteMany({ email: email.toLowerCase() });
     }
-    // =====================================================================
 
     const domain = email.split('@')[1];
     try{

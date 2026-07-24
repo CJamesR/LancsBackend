@@ -1,15 +1,5 @@
 const mongoose = require('mongoose');
 
-// =========================================================================
-// GATEWAY MODEL
-// Mewakili satu unit Gateway (ESP32 induk) yang sudah terdaftar di sistem.
-// Relasi: Satu Gateway → banyak Node (lihat nodeModel.js)
-//
-// Cara kerja pendaftaran:
-//   1. Gateway menyala → kirim MQTT topik LancsSK/gateway/register
-//   2. Server verifikasi user_token (JWT) → UPSERT dokumen ini
-//   3. Gateway kini terikat ke ownerId dan siap terima data dari node
-// =========================================================================
 const gatewaySchema = new mongoose.Schema({
     mac: {
         type: String,
@@ -19,20 +9,17 @@ const gatewaySchema = new mongoose.Schema({
         trim: true
     },
 
-    // Pemilik — diisi saat handleGatewayRegister berhasil verifikasi JWT
     ownerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         default: null
     },
 
-    // Nama yang bisa diubah user lewat Flutter
     name: {
         type: String,
-        default: null   // null berarti belum diberi nama, Flutter tampilkan mac saja
+        default: null   
     },
 
-    // Site tempat Gateway beroperasi (diisi saat user assign ke site)
     siteId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Site',
@@ -43,9 +30,6 @@ const gatewaySchema = new mongoose.Schema({
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: null },
 
-    // Mode FSM hardware saat ini (referensi saja, kendali ada di firmware)
-    // 2 = Operasional (ESP-NOW aktif, data mengalir)
-    // 3 = Pairing    (BLE aktif, ESP-NOW mati)
     currentMode: {
         type: Number,
         enum: [2, 3],

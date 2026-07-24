@@ -1,12 +1,12 @@
 const mqtt       = require('mqtt');
 const jwt        = require('jsonwebtoken');
 const getSensorModel = require('../models/sensorModel');
-const Device     = require('../models/device');       // model lama — tetap dipakai
-const Gateway    = require('../models/gatewayModel'); // model baru
-const Node       = require('../models/nodeModel');    // model baru
+const Device     = require('../models/device');       
+const Gateway    = require('../models/gatewayModel'); 
+const Node       = require('../models/nodeModel');    
 const Notification = require('../models/notificationModel');
-const Site       = require('../models/siteModel');   // untuk auto-assign gateway ke site saat registrasi
-const Transaction = require('../models/transactionModel'); // untuk menyimpan transaksi pairing aktif
+const Site       = require('../models/siteModel');   
+const Transaction = require('../models/transactionModel'); 
 
 class MQTTHandler {
   constructor() {
@@ -20,10 +20,6 @@ class MQTTHandler {
 
 
   }
-
-  // =========================================================================
-  // UTILITAS
-  // =========================================================================
   getWIBTime() {
     return new Date(Date.now() + 7 * 60 * 60 * 1000);
   }
@@ -41,10 +37,6 @@ class MQTTHandler {
     }
     return hash.toString(16).padStart(4, '0');
   }
-
-  // =========================================================================
-  // KONEKSI & SUBSCRIBE
-  // =========================================================================
   connect() {
     const options = {
       keepalive: 60,
@@ -220,9 +212,6 @@ async handleGatewayRegister(data) {
         
         return; 
       }
-      // ----------------------------------------------
-
-      // Mencari transaksi yang terkait dengan req_id (Logika Normal Aplikasi)
       const trx = await Transaction.findOne({ req_id });
       if (!trx || (!trx.status.includes('pending'))) return;
 
@@ -295,7 +284,6 @@ async handleGatewayRegister(data) {
           if (!isNaN(parsed.getTime())) waktuUntukDB = parsed;
         }
       }
-
       if (Checksum) {
         const expected = this.calculateChecksum(
           gateID, Suhu, Kelembapan, Waktu
@@ -312,8 +300,6 @@ async handleGatewayRegister(data) {
       } else {
         console.warn(`⚠️ [Checksum] No checksum from ${gateID}, data still processed.`);
       }
-
-      // ── Emit real-time ke Flutter via Socket.IO ─────────────────────────
       if (global.io) {
         const socketPayload = {
           id: gateID,
@@ -347,9 +333,6 @@ async handleGatewayRegister(data) {
         source: 'mqtt'
       });
       console.log(`✅ Data saved → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
-
-      // ── TUGAS 2: Bangun relasi Node → Gateway ──────────────────────────
-      // Hanya dijalankan jika nodeID valid (bukan '-' atau kosong)
       if (nodeID && nodeID !== '-') {
         // Cari Gateway induk di database
         const gateway = await Gateway.findOne({ mac: gateID.toUpperCase() });
@@ -369,19 +352,13 @@ async handleGatewayRegister(data) {
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-
         console.log(`🔗 [Relasi] Node ${nodeID} → Gateway ${gateID}${gateway ? ` (${gateway._id})` : ' (gateway not yet registered)'}`);
 
-        // Alarm suhu per-node
         if (node.siteId) {
           await this.checkAndCreateAlert(node, parseFloat(Suhu), nodeID);
         }
       }
-
-      // ── Perbarui status Gateway (Device lama juga diupdate untuk kompatibilitas) ──
       await this.updateGatewayStatus(gateID, parseFloat(Suhu));
-
-      // ── ACK ke Gateway ──────────────────────────────────────────────────
       this.publish(`LancsSK/ack/${gateID}`, JSON.stringify({
         status: 'success',
         message: 'Data received and saved.'
@@ -393,13 +370,10 @@ async handleGatewayRegister(data) {
   }
 
   async updateGatewayStatus(gateID, suhu) {
-    // Update Gateway model baru
     await Gateway.findOneAndUpdate(
       { mac: gateID.toUpperCase() },
       { $set: { isOnline: true, lastSeen: new Date() } }
     );
-
-    // Update Device lama (backward compatibility untuk statusChecker, siteRoutes, dll)
     let device = await Device.findOne({ serialID: gateID });
     if (!device) {
       console.log(`✨ New Gateway in old Device model (${gateID}). Registering...`);
@@ -414,8 +388,6 @@ async handleGatewayRegister(data) {
     device.lastActive = new Date();
     device.isOnline = true;
     await device.save();
-
-    // Alarm suhu di level Gateway (jika sudah diklaim ke site)
     if (device.siteId) {
       await this.checkAndCreateAlert(
         { siteId: device.siteId, minTemp: device.minTemp, maxTemp: device.maxTemp },
@@ -435,8 +407,6 @@ async handleGatewayRegister(data) {
       }
 
       console.log(`\n🔗 [MQTT IN] Status Koneksi Node: ${nodeID} -> ${gateID} (${status})`);
-
-      // 1. Update status Node di Database jika berhasil
       if (status === 'success') {
         const gateway = await Gateway.findOne({ mac: gateID.toUpperCase() });
         
@@ -454,8 +424,6 @@ async handleGatewayRegister(data) {
         );
         console.log(`✅ Database diupdate: Node ${nodeID} terdaftar di Gateway ${gateID}`);
       }
-
-      // 2. Tembakkan (Emit) ke Flutter melalui Socket.io
       if (global.io) {
         const eventName = `node_status_${gateID.toUpperCase()}`;
         global.io.emit(eventName, {
@@ -518,7 +486,6 @@ async handleGatewayRegister(data) {
   }
 
   sendGatewayCommand(gatewayMac, cmd, extraPayload = {}) {
-    // 1. Validasi Absolut: Cegah pengiriman tanpa arah rute yang spesifik
     if (!gatewayMac) {
       console.error('❌ [FATAL] Execution cancelled: Target MAC Address Gateway not defined (null/empty).');
       return false;
@@ -528,14 +495,10 @@ async handleGatewayRegister(data) {
       console.error('❌ Failed to send command: Node.js server disconnected from MQTT broker.');
       return false;
     }
-
-    // 2. Hapus Parameter Payload: gateway_mac dicabut dari rakitan JSON
     const payload = JSON.stringify({
       cmd,
       ...extraPayload 
     });
-
-    // 3. Routing Dinamis: Topik disuntikkan langsung dengan MAC target
     const targetTopic = `LancsSK/gateway/cmd/${gatewayMac}`;
     
     this.mqttClient.publish(targetTopic, payload, { qos: 1 });
@@ -543,20 +506,18 @@ async handleGatewayRegister(data) {
     
     return true;
   }
-
   async processNextDeletion(gatewayMac) {
     try {
-      // 1. Mencari satu antrean terlama (FIFO) berdasarkan gateway_mac
+
       const nextTarget = await Transaction.findOne({
         gateway_mac: gatewayMac,
         status: 'pending_delete',
         type: 'node'
-      }).sort({ createdAt: 1 }); // Urutkan berdasarkan waktu pembuatan terlama
+      }).sort({ createdAt: 1 }); 
 
       if (nextTarget) {
         console.log(`⏳ [QUEUE ENGINE] Menembakkan perintah hapus untuk Node: ${nextTarget.node_mac} ke Gateway ${gatewayMac}`);
         
-        // 2. Menembakkan perintah dan membiarkan sistem kembali asinkron
         this.sendGatewayCommand(gatewayMac, 'delete_node', {
           req_id: nextTarget.req_id,
           node_mac: nextTarget.node_mac
