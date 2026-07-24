@@ -450,3 +450,49 @@ exports.getSiteNodes = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 }
+
+exports.renameNode = async (req, res) => {
+    try {
+        const nodeId = req.params.nodeId;
+        const newName = req.body.name;
+        const userId = req.user.userId;
+
+        if (!newName || newName.trim() === '') {
+            return res.status(400).json({ success: false, message: "New name cannot be empty." });
+        }
+
+        const targetNode = await Node.findById(nodeId);
+        if (!targetNode) {
+            return res.status(404).json({success: false, message: "Node not found."});
+        }
+        const site = await Site.findById(targetNode.siteId);
+        if (!site) {
+            return res.status(404).json({success: false, message: "Associated site not found."});
+        }
+        const isOwner = site.ownerId.toString() === userId.toString();
+        const isMember = site.members.some(m => m.userId.toString() === userId.toString());
+
+        if (!isOwner && !isMember) {
+            return res.status(403).json({success: false, message: "You do not have permission to rename this node."});
+        }
+        const duplicateNode = await Node.findOne({
+            siteId: site._id,
+            _id: { $ne: nodeId },
+            name: { $regex: new RegExp(`^${newName.trim()}$`, 'i') }
+        });
+        if (duplicateNode) {
+            return res.status(400).json({success: false, message: "A node with this name already exists in the site."});
+        }
+        targetNode.name = newName.trim();
+        await targetNode.save();
+
+        return res.json({
+            message: "Node name updated successfully.",
+            node: targetNode
+        });
+    }
+    catch (error) {
+        console.error("❌ Error Rename Node:", error);
+        return res.status(500).json({success: false, message: "An error occurred while renaming the node.", error: error.message});
+    }
+}

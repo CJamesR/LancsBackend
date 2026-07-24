@@ -2,6 +2,9 @@ const User = require('../models/userModel');
 const Invite = require('../models/inviteModel'); 
 const Site = require('../models/siteModel');
 const ActivityLog = require('../models/activityLogModel');
+const Node = require('../models/nodeModel');
+const Sensor = require('../models/sensorModel');
+const Notification = require('../models/notificationModel');
 
 // @desc    Get all users (admin only)
 // @route   GET /api/users
@@ -213,3 +216,37 @@ exports.respondToInvite = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+
+exports.deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const ownedSites = await Site.find({ ownerId: userId });
+
+    for (const site of ownedSites) {
+      const siteId = site._id;
+
+      await ActivityLog.deleteMany({ siteId: siteId });
+      await Invite.deleteMany ({ siteId: siteId});
+      await Notification.deleteMany({ siteId: siteId });
+
+      const nodes = await Node.find({ siteId: siteId });
+      for (const node of nodes) {
+        await Sensor.deleteMany({ nodeId: node._id });
+      }
+
+      await Node.deleteMany({ siteId: siteId });
+      await Site.deleteOne({ _id: siteId });
+    }
+    await Site.updateMany(
+      {members: userId},
+      {$pull: {members: userId}}
+    );
+    await User.findByIdAndDelete(userId);
+    return res.json({ success: true, message: 'Account and all data included successfully deleted' });
+  }
+  catch (error) {
+    console.error('Delete account error:', error);
+    return res.status(500).json({ success: false, message: 'Error deleting account', error: error.message });
+  }
+}

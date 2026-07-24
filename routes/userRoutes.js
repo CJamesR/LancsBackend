@@ -13,5 +13,6 @@ router.put('/change-password', userController.changePassword);
 router.get('/all', restrictTo('admin'), userController.getAllUsers);
 router.get('/invites', userController.getPendingInvites);
 router.post('/invites/respond', userController.respondToInvite);
+router.delete('/delete-account', protect, userController.deleteAccount);
 
 module.exports = router;
