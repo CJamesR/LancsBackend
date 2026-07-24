@@ -21,13 +21,11 @@ const checksumValidator = require("./middleware/checksumValidator");
 // Routes Imports
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
-const sensorRoutes = require("./routes/sensorRoutes");
 const flutterRoutes = require('./routes/flutterRoutes'); //
 const databaseRoutes = require('./routes/databaseRoutes');
 const sensorController = require("./controllers/sensorController");
 const dataController = require("./controllers/dataController");
 const mqttHandler = require("./mqtt/mqttHandler");
-const nfcRoutes = require('./routes/nfcHandler');
 const siteRoutes = require('./routes/siteRoutes');
 const startOfflineChecker = require('./cron/statusChecker');
 const notificationRoutes = require('./routes/notificationRoutes');
@@ -88,11 +86,8 @@ const limiter = rateLimit({
 app.use("/api", limiter)
 app.use(morgan('dev'))
 app.use("/api/user", userRoutes);
-// app.use('/api/sensors', sensorRoutes);
-// app.use("/api/devices", deviceRoutes);
 app.use('/api/database', databaseRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/nfc', nfcRoutes);
 app.use('/api/sites', protect, siteRoutes);
 app.use("/api/flutter", protect, flutterRoutes);
 app.use('/api/notifications', notificationRoutes);
