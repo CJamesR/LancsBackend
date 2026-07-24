@@ -217,36 +217,36 @@ exports.respondToInvite = async (req, res) => {
     }
 };
 
-exports.deleteAccount = async (req, res) => {
-  try {
-    const userId = req.user._id;
+// exports.deleteAccount = async (req, res) => {
+//   try {
+//     const userId = req.user._id;
 
-    const ownedSites = await Site.find({ ownerId: userId });
+//     const ownedSites = await Site.find({ ownerId: userId });
 
-    for (const site of ownedSites) {
-      const siteId = site._id;
+//     for (const site of ownedSites) {
+//       const siteId = site._id;
 
-      await ActivityLog.deleteMany({ siteId: siteId });
-      await Invite.deleteMany ({ siteId: siteId});
-      await Notification.deleteMany({ siteId: siteId });
+//       await ActivityLog.deleteMany({ siteId: siteId });
+//       await Invite.deleteMany ({ siteId: siteId});
+//       await Notification.deleteMany({ siteId: siteId });
 
-      const nodes = await Node.find({ siteId: siteId });
-      for (const node of nodes) {
-        await Sensor.deleteMany({ nodeId: node._id });
-      }
+//       const nodes = await Node.find({ siteId: siteId });
+//       for (const node of nodes) {
+//         await Sensor.deleteMany({ nodeId: node._id });
+//       }
 
-      await Node.deleteMany({ siteId: siteId });
-      await Site.deleteOne({ _id: siteId });
-    }
-    await Site.updateMany(
-      {members: userId},
-      {$pull: {members: userId}}
-    );
-    await User.findByIdAndDelete(userId);
-    return res.json({ success: true, message: 'Account and all data included successfully deleted' });
-  }
-  catch (error) {
-    console.error('Delete account error:', error);
-    return res.status(500).json({ success: false, message: 'Error deleting account', error: error.message });
-  }
-}
+//       await Node.deleteMany({ siteId: siteId });
+//       await Site.deleteOne({ _id: siteId });
+//     }
+//     await Site.updateMany(
+//       {members: userId},
+//       {$pull: {members: userId}}
+//     );
+//     await User.findByIdAndDelete(userId);
+//     return res.json({ success: true, message: 'Account and all data included successfully deleted' });
+//   }
+//   catch (error) {
+//     console.error('Delete account error:', error);
+//     return res.status(500).json({ success: false, message: 'Error deleting account', error: error.message });
+//   }
+// }
