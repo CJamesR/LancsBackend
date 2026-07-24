@@ -1,11 +1,12 @@
-// diagnoseSite.js
-// Cara Penggunaan:
-// 1. node diagnoseSite.js                  (HANYA pemindaian massal ke semua data)
-// 2. node diagnoseSite.js <ID_SITE>        (Cek spesifik 1 site, lalu pemindaian massal)
-// 3. node diagnoseSite.js --cleanup        (Pemindaian massal + hapus orphan)
-// 4. node diagnoseSite.js <ID_SITE> --cleanup
+// cmd_scripts/diagnoseSite.js
+// Cara Penggunaan dari direktori utama (LancsBackend):
+// 1. node cmd_scripts/diagnoseSite.js                  (HANYA pemindaian massal ke semua data)
+// 2. node cmd_scripts/diagnoseSite.js <ID_SITE>        (Cek spesifik 1 site, lalu pemindaian massal)
+// 3. node cmd_scripts/diagnoseSite.js --cleanup        (Pemindaian massal + hapus orphan)
 
-require('dotenv').config();
+const path = require('path');
+// Mengunci lokasi .env naik satu tingkat dari folder cmd_scripts
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const mongoose = require('mongoose');
 
 // Ambil parameter dari terminal
@@ -15,6 +16,12 @@ const isCleanup = args.includes('--cleanup');
 const paramId = args.find(arg => !arg.startsWith('--'));
 
 async function diagnose() {
+    // Validasi pembacaan .env sebelum mencoba menyambung ke pangkalan data
+    if (!process.env.MONGO_URI) {
+        console.log('❌ FATAL ERROR: Variabel MONGO_URI tidak terbaca. Pastikan fail .env berada di direktori root.');
+        process.exit(1);
+    }
+
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ Connected to MongoDB\n');
 
@@ -24,7 +31,6 @@ async function diagnose() {
     // BLOK A: PENGECEKAN SPESIFIK (Hanya berjalan jika ID diberikan)
     // =========================================================
     if (paramId) {
-        // Validasi ObjectID sebelum melakukan pencarian untuk mencegah Crash
         if (!mongoose.Types.ObjectId.isValid(paramId)) {
             console.log(`❌ FATAL ERROR: SITE_ID "${paramId}" tidak valid. Harus format 24 karakter heksadesimal.`);
             process.exit(1);
@@ -36,7 +42,6 @@ async function diagnose() {
         console.log(`🔍 DIAGNOSIS SPESIFIK UNTUK ID: ${paramId}`);
         console.log('='.repeat(60));
 
-        // --- Cek 1: Raw query ke koleksi "sites" ---
         const rawSite = await db.collection('sites').findOne({ _id: targetSiteObjId });
 
         if (!rawSite) {
@@ -48,7 +53,6 @@ async function diagnose() {
             console.log('');
         }
 
-        // --- Cek 2: Eksistensi ownerId di koleksi users ---
         if (rawSite && rawSite.ownerId) {
             const ownerObjId = mongoose.Types.ObjectId.isValid(rawSite.ownerId) 
                 ? new mongoose.Types.ObjectId(rawSite.ownerId) 
@@ -64,7 +68,6 @@ async function diagnose() {
             }
         }
 
-        // --- Cek 4: Referensi balik untuk Site Spesifik (Dipindah ke atas agar mengelompok) ---
         console.log(`Cek relasi untuk site ${paramId}...`);
         const activityCount = await db.collection('activitylogs').countDocuments({ siteId: targetSiteObjId });
         const inviteCount = await db.collection('invites').countDocuments({ siteId: targetSiteObjId });
@@ -88,17 +91,15 @@ async function diagnose() {
     console.log(`Total data di koleksi "sites": ${allSites.length}\n`);
 
     let orphanCount = 0;
-    const orphanSitesList = []; // Simpan list orphan untuk keperluan cleanup
+    const orphanSitesList = []; 
 
     for (const site of allSites) {
         let isOrphan = false;
 
-        // Kondisi 1: Field ownerId kosong/null
         if (!site.ownerId) {
             console.log(`⚠️  Site "${site.name}" (${site._id}) — Field ownerId KOSONG/NULL`);
             isOrphan = true;
         } else {
-            // Kondisi 2: OwnerId ada, tapi usernya sudah hilang dari pangkalan data
             const ownerObjId = mongoose.Types.ObjectId.isValid(site.ownerId) 
                 ? new mongoose.Types.ObjectId(site.ownerId) 
                 : null;
@@ -123,7 +124,7 @@ async function diagnose() {
         console.log(`\n❌ Ditemukan total: ${orphanCount} Orphan Site.`);
         if (!isCleanup) {
             console.log('   → Untuk membersihkan data sampah tersebut, tambahkan bendera --cleanup:');
-            console.log('   node diagnoseSite.js --cleanup\n');
+            console.log('   node cmd_scripts/diagnoseSite.js --cleanup\n');
         }
     }
 
@@ -139,13 +140,9 @@ async function diagnose() {
             for (const site of orphanSitesList) {
                 const siteObjId = new mongoose.Types.ObjectId(site._id);
                 
-                // 1. Hapus referensi di Activity Logs
                 const actRes = await db.collection('activitylogs').deleteMany({ siteId: siteObjId });
-                // 2. Hapus referensi di Invites
                 const invRes = await db.collection('invites').deleteMany({ siteId: siteObjId });
-                // 3. Hapus referensi di Notifications
                 const notifRes = await db.collection('notifications').deleteMany({ siteId: siteObjId });
-                // 4. Terakhir, Hapus Site tersebut dari koleksi sites
                 await db.collection('sites').deleteOne({ _id: siteObjId });
 
                 console.log(`🗑️  TERHAPUS: "${site.name}" (${site._id})`);
