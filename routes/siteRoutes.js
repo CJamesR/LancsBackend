@@ -238,6 +238,6 @@ router.get(
     siteController.getSiteNodes
 );
 
-router.patch('/node/:id/rename', protect, checkSiteRole(['owner', 'admin']), siteController.renameNode);
+// router.patch('/:siteId/nodes/:id/rename', protect, checkSiteRole(['owner', 'admin']), siteController.renameNode);
 
 module.exports = router;
