@@ -6,7 +6,8 @@ const nodeSchema = new mongoose.Schema({
         required: true,
         unique: true,
         uppercase: true,
-        trim: true
+        trim: true,
+        index: true
     },
     gateID: {
         type: mongoose.Schema.Types.ObjectId,
@@ -17,11 +18,12 @@ const nodeSchema = new mongoose.Schema({
     siteId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Site',
-        default: null
+        default: null,
+        index: true
     },
     name: {
         type: String,
-        default: null   
+        default: null
     },
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: null },
@@ -34,6 +36,6 @@ const nodeSchema = new mongoose.Schema({
 
 }, {
     timestamps: true
-});
+}); 
 
 module.exports = mongoose.model('Node', nodeSchema);

@@ -16,9 +16,13 @@ class MQTTHandler {
 
     this.sensorDataBuffer = {};
 
+    this.deviceCache = {
+      gateways: {},
+      nodes: {}
+    };
+
     setInterval(() => this.flushSensorDataBuffer(), 30000);
-
-
+    setInterval(() => this.deviceCache = { gateways: {}, nodes: {} }, 3600000);
   }
   getWIBTime() {
     return new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -274,11 +278,9 @@ async handleGatewayRegister(data) {
       let waktuUntukDB = new Date();
       if (Waktu && typeof Waktu === 'string') {
         if (Waktu.includes('T')) {
-          // Format ISO penuh
           const parsed = new Date(Waktu);
           if (!isNaN(parsed.getTime())) waktuUntukDB = parsed;
         } else if (Waktu.includes(':')) {
-          // Format jam saja — gabungkan dengan tanggal WIB hari ini
           const dateWIB = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
           const parsed = new Date(`${dateWIB}T${Waktu}+07:00`);
           if (!isNaN(parsed.getTime())) waktuUntukDB = parsed;
@@ -334,10 +336,23 @@ async handleGatewayRegister(data) {
       });
       console.log(`✅ Data saved → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
       if (nodeID && nodeID !== '-') {
-        // Cari Gateway induk di database
-        const gateway = await Gateway.findOne({ mac: gateID.toUpperCase() });
+        const upperNodeID = nodeID.toUpperCase();
+        const upperGateID = gateID.toUpperCase();
+        if (!this.deviceCache.nodes[upperNodeID]) {
+          let gatewayIdForNode = null;
+          let siteIdForNode = null;
 
-        // UPSERT Node — jika node ini baru, daftarkan otomatis
+          if (this.deviceCache.gateways[upperGateID]) {
+            const gateway = await Gateway.findOne({ mac: upperGateID }).lean();
+            if (gateway) {
+              this.deviceCache.gateways[upperGateID] = {id: gateway._id, siteId: gateway.siteId};
+              gatewayIdForNode = gateway._id;
+              siteIdForNode = gateway.siteId;
+            }
+          } else{
+            gatewayIdForNode = this.deviceCache.gateways[upperGateID]?.id;
+            siteIdForNode = this.deviceCache.gateways[upperGateID]?.siteId;
+          }
         const node = await Node.findOneAndUpdate(
           { nodeID: nodeID.toUpperCase() },
           {
@@ -352,12 +367,14 @@ async handleGatewayRegister(data) {
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+        this.deviceCache.nodes[upperNodeID] = true;
         console.log(`🔗 [Relasi] Node ${nodeID} → Gateway ${gateID}${gateway ? ` (${gateway._id})` : ' (gateway not yet registered)'}`);
 
         if (node.siteId) {
           await this.checkAndCreateAlert(node, parseFloat(Suhu), nodeID);
         }
       }
+    }
       await this.updateGatewayStatus(gateID, parseFloat(Suhu));
       this.publish(`LancsSK/ack/${gateID}`, JSON.stringify({
         status: 'success',

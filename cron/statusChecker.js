@@ -3,40 +3,43 @@ const Device = require('../models/device');
 const Notification = require('../models/notificationModel');
 
 const startOfflineChecker = () => {
-    // Cron job ini akan berjalan otomatis setiap 5 menit (*/5 * * * *)
     cron.schedule('*/5 * * * *', async () => {
         try {
             console.log('🕵️‍♂️ [CRON] Checking Sensor Status (Offline Check)...');
             
-            // Tentukan batas waktu: 10 menit yang lalu dari waktu sekarang
             const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-            // Cari SEMUA alat yang:
-            // 1. Saat ini statusnya masih Online
-            // 2. Terakhir aktif (lastActive) lebih lama dari 10 menit yang lalu
-            // 3. Sudah diklaim ke dalam sebuah Site
             const offlineDevices = await Device.find({
                 isOnline: true,
                 lastActive: { $lt: tenMinutesAgo },
                 siteId: { $ne: null } 
-            });
+            }).select('_id serialID name siteId').lean();
 
-            // Jika ada alat yang terdeteksi mati, lakukan ini:
+            if (offlineDevices.length === 0) {
+                console.log('✅ All devices are online.');
+                return;
+            }
+
+            const deviceIds =[];
+            const notifications = [];
             for (const device of offlineDevices) {
-                // 1. Ubah status alat di database menjadi Offline
-                device.isOnline = false;
-                await device.save();
+                deviceIds.push(device._id);
 
                 // 2. Buat Notifikasi dan simpan ke database
-                await Notification.create({
+                notifications.push({
                     siteId: device.siteId,
                     deviceId: device.serialID,
                     type: 'STATUS_OFFLINE',
                     title: 'Sensor Disconnected (Offline)',
                     message: `Device ${device.name} have stopped sending data since 10 minutes ago. Please check the power or WiFi connection.`
                 });
-                console.log(`⚠️ OFFLINE ALARM TRIGGERED: ${device.name} was just declared dead.`);
             }
+            await Device.updateMany(
+                { _id: { $in: deviceIds } },
+                { $set: { isOnline: false } }
+            );
+            await Notification.insertMany(notifications);
+            console.log(`⚠️ [CRON] OFFLINE ALARM: ${offlineDevices.length} devices were just declared dead.`);
 
         } catch (error) {
             console.error('❌ Error in Cron Job status checker:', error.message);

@@ -12,7 +12,8 @@ const gatewaySchema = new mongoose.Schema({
     ownerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        default: null
+        default: null,
+        index: true
     },
 
     name: {
@@ -23,7 +24,8 @@ const gatewaySchema = new mongoose.Schema({
     siteId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Site',
-        default: null
+        default: null,
+        index: true
     },
 
     // Status koneksi — diupdate setiap data masuk via MQTT
