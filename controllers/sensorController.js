@@ -364,30 +364,23 @@ exports.getLatestSensorDataPublic = async (req, res) => {
 exports.getAggregatedData = async (req, res) => {
   try {
     const { sensorId } = req.params;
-    const { interval = 'hour' } = req.query; // hour, day, week, month
+    const { interval = 'hour', days = 7 } = req.query; // hour, day, week, month
 
     const SensorModel = getSensorModel(sensorId);
 
+    const timeAgo = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
     let groupByFormat;
     switch (interval) {
-      case 'hour':
-        groupByFormat = '%Y-%m-%d %H:00:00';
-        break;
-      case 'day':
-        groupByFormat = '%Y-%m-%d';
-        break;
-      case 'week':
-        groupByFormat = '%Y-%U';
-        break;
-      case 'month':
-        groupByFormat = '%Y-%m';
-        break;
-      default:
-        groupByFormat = '%Y-%m-%d %H:00:00';
+      case 'hour': groupByFormat = '%Y-%m-%d %H:00:00'; break;
+      case 'day': groupByFormat = '%Y-%m-%d'; break;
+      case 'week': groupByFormat = '%Y-%U'; break;
+      case 'month': groupByFormat = '%Y-%m'; break;
+      default: groupByFormat = '%Y-%m-%d %H:00:00';
     }
 
-    // Aggregation pipeline
     const aggregatedData = await SensorModel.aggregate([
+      { $match: { Waktu: { $gte: timeAgo } } },
       {
         $group: {
           _id: {

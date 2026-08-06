@@ -122,7 +122,7 @@ exports.getDashboardStats = async (req, res) => {
 exports.getChartData = async (req, res) => {
   try {
     const { deviceId } = req.params;
-    const { interval = 'hour', hours = 24 } = req.query;
+    const { interval = 'hour', hours = 24, nodeId } = req.query;
     const userId = req.user.userId;
     
     const user = await User.findById(req.user.userId);
@@ -140,24 +140,18 @@ exports.getChartData = async (req, res) => {
     
     let groupByFormat;
     switch(interval) {
-      case 'minute':
-        groupByFormat = '%Y-%m-%d %H:%M:00';
-        break;
-      case 'hour':
-        groupByFormat = '%Y-%m-%d %H:00:00';
-        break;
-      case 'day':
-        groupByFormat = '%Y-%m-%d';
-        break;
-      default:
-        groupByFormat = '%Y-%m-%d %H:00:00';
+      case 'minute': groupByFormat = '%Y-%m-%d %H:%M:00'; break;
+      case 'hour': groupByFormat = '%Y-%m-%d %H:00:00'; break;
+      case 'day': groupByFormat = '%Y-%m-%d'; break;
+      default: groupByFormat = '%Y-%m-%d %H:00:00';
     }
     
+    const matchFilter = { Waktu: { $gte: timeAgo } };
+
+    if (nodeId) matchFilter.nodeID = nodeId;
     const chartData = await SensorModel.aggregate([
       {
-        $match: {
-          Waktu: { $gte: timeAgo }
-        }
+        $match: matchFilter
       },
       {
         $group: {

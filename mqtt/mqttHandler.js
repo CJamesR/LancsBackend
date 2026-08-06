@@ -109,7 +109,9 @@ class MQTTHandler {
       (topic.startsWith('LancsSK/') && topic.endsWith('/data'))
     ) {
       await this.processSensorData(data);
-    } else if (topic === 'LancsSK/status' || topic === 'LancsSK/device/status') {
+    } else if (topic === 'LancsSK/status') {
+      await this.handleGatewayHeartbeat(data);
+    } else if (topic === 'LancsSK/device/status') {
       console.log('📊 [MQTT] Device Status:', data);
     }
   }
@@ -545,6 +547,25 @@ async handleGatewayRegister(data) {
     } catch (error) {
       console.error(`❌ [QUEUE ENGINE ERROR] Gagal mengeksekusi rotasi antrean:`, error.message);
     }
+  }
+  async handleGatewayHeartbeat(data) {
+    const {gateID, status} = data;
+    if (!gateID) {
+      console.warn('⚠️ Payload heartbeat tidak lengkap: gateID kosong.');
+      return;
+    }
+    const upperGateID = gateID.toUpperCase();
+    const now = Date.now();
+
+    if (!this.deviceCache.lastSeen) this.deviceCache.lastSeen = {};
+
+    if (!this.deviceCache.lastSeen[upperGateID] || now - this.deviceCache.lastSeen[upperGateID] > 60000) {
+      await this.updateGatewayStatus(upperGateID, null);
+      this.deviceCache.lastSeen[upperGateID] = now;
+      console.log(`💓 [HEARTBEAT] Gateway ${upperGateID} is online. Last seen updated.`);
+    }
+  } catch (error) {
+    console.error(`❌ Error handleGatewayHeartbeat:`, error.message);
   }
 }
 
