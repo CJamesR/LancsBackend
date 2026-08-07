@@ -32,7 +32,6 @@ class MQTTHandler {
     return { connected: this.mqttClient ? this.mqttClient.connected : false };
   }
 
-  // Algoritma checksum identik dengan checksumValidator.js dan firmware
   calculateChecksum(id, suhu, kelembapan, waktu) {
     const data = id + Number(suhu).toFixed(2) + Number(kelembapan).toFixed(2) + waktu;
     let hash = 0;
@@ -80,11 +79,38 @@ class MQTTHandler {
   }
 
   async handleMessage(topic, message) {
+    if (topic === 'LancsSK/sensor/data' || (topic.startsWith('LancsSK/') && topic.endsWith('/data'))) {
+      if (Buffer.isBuffer(message) && message.length === 20) {
+        try {
+          const macGateBuffer = message.subarray(0, 6);
+          const gateID = macGateBuffer.toString('hex').match(/.{1,2}/g).join(':').toUpperCase();
+
+          const macNodeBuffer = message.subarray(6, 12);
+          const nodeID = macNodeBuffer.toString('hex').match(/.{1,2}/g).join(':').toUpperCase();
+
+          const Suhu = message.readFloatLE(12);
+          const Kelembapan = message.readFloatLE(16);
+
+          const convertedBiner = {
+            gateID: gateID,
+            nodeID: nodeID,
+            Suhu: Suhu,
+            Kelembapan: Kelembapan,
+            Waktu: new Date()
+          };
+          await this.processSensorData(convertedBiner);
+          return;
+        } catch (error) {
+          console.error('❌ Error converting binary MQTT message:', error.message);
+          return;
+        }
+      }
+    } 
     let data;
     try {
-      data = JSON.parse(message);
+      data = JSON.parse(message.toString());
     } catch {
-      console.error('❌MQTT message is not valid JSON:', message);
+      console.error('❌MQTT message is not valid JSON:', message.toString());
       return;
     }
     if (topic === 'LancsSK/gateway/register') {
