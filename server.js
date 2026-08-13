@@ -206,14 +206,28 @@ const HOST = process.env.HOST || '0.0.0.0'; // Use your local IP for external ac
 
 const http = require('http');
 const { Server } = require('socket.io');
-const { createAdapter } = require('@socket.io/pm2')
+const pm2Adapter = require("@socket.io/pm2");
+console.log("🔍 BONGKAR ISI MODUL:", pm2Adapter);
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: "*" }
 });
 
-io.adapter(createAdapter());
+let adapter;
+if (typeof pm2Adapter.createAdapter === 'function') {
+  adapter = pm2Adapter.createAdapter();
+} else if (pm2Adapter.default && typeof pm2Adapter.default.createAdapter === 'function') {
+  adapter = pm2Adapter.default.createAdapter();
+} else if (typeof pm2Adapter === 'function') {
+  adapter = pm2Adapter();
+}
+
+if (adapter) {
+  io.adapter(adapter);
+} else {
+  console.warn("⚠️ Peringatan: Adapter PM2 gagal diinisialisasi karena format fungsi tidak dikenali.");
+}
 
 global.io = io;
 
