@@ -32,12 +32,13 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const mongoose = require('mongoose');
 const getSensorModel = require('./models/sensorModel');
 const admin = require("firebase-admin");
+const { initializeApp, cert } = require("firebase-admin/app");
 const serviceAccount = require("./config/serviceAccountKey.json");
 try {
   const serviceAccount = require("./config/serviceAccountKey.json");
   
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+  initializeApp({
+    credential: cert(serviceAccount)
   });
   console.log("🔥 Firebase Admin SDK (FCM) berhasil diinisialisasi.");
 } catch (error) {
