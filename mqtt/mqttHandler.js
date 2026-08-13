@@ -362,6 +362,7 @@ async handleGatewayRegister(data) {
         Checksum: Checksum || null,
         source: 'mqtt'
       });
+
       console.log(`✅ Data saved → sensor_${gateID} | Waktu: ${waktuUntukDB.toISOString()}`);
       if (nodeID && nodeID !== '-') {
         const upperNodeID = nodeID.toUpperCase();
@@ -369,6 +370,7 @@ async handleGatewayRegister(data) {
         if (!this.deviceCache.nodes[upperNodeID]) {
           let gatewayIdForNode = null;
           let siteIdForNode = null;
+          let gateway = null;
 
           if (this.deviceCache.gateways[upperGateID]) {
             const gateway = await Gateway.findOne({ mac: upperGateID }).lean();
@@ -575,23 +577,25 @@ async handleGatewayRegister(data) {
     }
   }
   async handleGatewayHeartbeat(data) {
-    const {gateID, status} = data;
-    if (!gateID) {
-      console.warn('⚠️ Payload heartbeat tidak lengkap: gateID kosong.');
-      return;
-    }
-    const upperGateID = gateID.toUpperCase();
-    const now = Date.now();
+    try {
+      const {gateID, status} = data;
+      if (!gateID) {
+        console.warn('⚠️ Payload heartbeat tidak lengkap: gateID kosong.');
+        return;
+      }
+      const upperGateID = gateID.toUpperCase();
+      const now = Date.now();
 
-    if (!this.deviceCache.lastSeen) this.deviceCache.lastSeen = {};
+      if (!this.deviceCache.lastSeen) this.deviceCache.lastSeen = {};
 
-    if (!this.deviceCache.lastSeen[upperGateID] || now - this.deviceCache.lastSeen[upperGateID] > 60000) {
-      await this.updateGatewayStatus(upperGateID, null);
-      this.deviceCache.lastSeen[upperGateID] = now;
-      console.log(`💓 [HEARTBEAT] Gateway ${upperGateID} is online. Last seen updated.`);
+      if (!this.deviceCache.lastSeen[upperGateID] || now - this.deviceCache.lastSeen[upperGateID] > 60000) {
+        await this.updateGatewayStatus(upperGateID, null);
+        this.deviceCache.lastSeen[upperGateID] = now;
+        console.log(`💓 [HEARTBEAT] Gateway ${upperGateID} is online. Last seen updated.`);
+      }
+    } catch (error) {
+      console.error(`❌ Error handleGatewayHeartbeat:`, error.message);
     }
-  } catch (error) {
-    console.error(`❌ Error handleGatewayHeartbeat:`, error.message);
   }
 }
 

@@ -1,6 +1,12 @@
 const Site = require('../models/siteModel');
 const Device = require('../models/device');
 
+const extractUserId = (user) => {
+  const raw = user?._id ?? user?.userId ?? user?.id;
+  if (!raw) throw new Error('User ID not found in JWT Token');
+  return raw.toString();
+};
+
 const checkSensorAccess = async (req, res, next) => {
   try {
     const sensorId = req.params.sensorId || req.body.gateID;
@@ -10,29 +16,24 @@ const checkSensorAccess = async (req, res, next) => {
       return res.status(401).json({ message: 'Not authenticated' });
     }
     
-    // Admin sistem (Superadmin) dapat mengakses semua sensor
     if (user.role === 'admin') {
       return next();
     }
     
-    // Cari alat ini terdaftar di Site mana
     const device = await Device.findOne({ serialID: sensorId });
     if (!device || !device.siteId) {
         return res.status(403).json({ message: 'Device not registered in any site.' });
     }
 
-    // Cari Site-nya
     const site = await Site.findById(device.siteId);
     if (!site) {
         return res.status(403).json({ message: 'Site for this device not found.' });
     }
 
-    // Cek apakah user adalah Admin dari Site ini
     if (site.ownerId.toString() === user.userId.toString()) {
         return next();
     }
 
-    // Cek apakah user adalah Viewer yang diizinkan melihat alat ini
     const isAdminAllowed = site.viewers.some(v => 
         v.userId.toString() === user.userId.toString() && 
         v.allowedDevices.includes(sensorId)
@@ -41,7 +42,16 @@ const checkSensorAccess = async (req, res, next) => {
     if (isAdminAllowed) {
         return next();
     }
+
+    const isMemberAllowed = site.members.some(m => 
+        m.userId.toString() === userIdStr &&
+        m.allowedDevices.includes(sensorId)
+    );
     
+    if (isMemberAllowed) {
+        return next();
+    }
+
     res.status(403).json({ 
       message: 'Access denied. You do not have permission to view data for this sensor.' 
     });

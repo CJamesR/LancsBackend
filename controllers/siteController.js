@@ -1,6 +1,6 @@
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
-const admin = require('firebase-admin'); 
+// const admin = require('firebase-admin');
+const { getMessaging } = require('firebase-admin/messaging'); 
 const User = require('../models/userModel');
 const Site = require('../models/siteModel');
 const ActivityLog = require('../models/activityLogModel');
@@ -12,14 +12,6 @@ const formatWIB = (date) => {
     if (!date) return null;
     return new Date(date).toLocaleString('sv-SE', { timeZone: 'Asia/Jakarta' });
 };
-
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    }
-});
 
 const extractUserId = (req) => {
     const raw = req.user?._id ?? req.user?.userId ?? req.user?.id;
@@ -158,7 +150,7 @@ exports.inviteUser = async (req, res) => {
             // 🔔 Kirim Push Notification FCM jika user punya fcmToken
             if (targetUser.fcmToken) {
                 try {
-                    await admin.messaging().send({
+                    await getMessaging().send({
                         token: targetUser.fcmToken,
                         notification: {
                             title: "Undangan Site 📩",
@@ -176,28 +168,7 @@ exports.inviteUser = async (req, res) => {
                     console.error("⚠️ Gagal kirim FCM:", fcmErr.message);
                 }
             }
-
-            // 📧 Kirim Email Notifikasi (fallback / tambahan)
-            try {
-                await transporter.sendMail({
-                    from: `"Lancs IoT" <${process.env.SMTP_USER}>`,
-                    to: targetUser.email,
-                    subject: `Undangan Bergabung ke Site ${site.name}`,
-                    html: `
-                        <div style="font-family: sans-serif; text-align: center; padding: 20px;">
-                            <h2>Halo, ${targetUser.username}!</h2>
-                            <p>Anda diundang bergabung ke Site <b>${site.name}</b> sebagai <b>${role || 'member'}</b> oleh <b>${inviter?.username || 'Owner'}</b>.</p>
-                            <p>Buka aplikasi Lancs IoT untuk menerima atau menolak undangan ini.</p>
-                        </div>
-                    `
-                });
-            } catch (emailErr) {
-                // ⚠️ Email gagal tapi invite tetap berhasil dibuat — jangan gagalkan response
-                console.error("⚠️ Failed to send email notification:", emailErr.message);
-            }
-
             return res.status(200).json({ success: true, message: `Invite berhasil dikirim ke ${targetUser.username}. Menunggu konfirmasi dari mereka.` });
-
         } else {
             // ============================================================
             // USER BELUM PUNYA AKUN — Kirim link pendaftaran (flow lama)
@@ -217,24 +188,13 @@ exports.inviteUser = async (req, res) => {
                 action: `Sent pending invite to ${email}`
             });
 
-            const mailOptions = {
-                from: `"Lancs IoT" <${process.env.SMTP_USER}>`,
-                to: email,
-                subject: `Undangan Bergabung ke Site ${site.name}`,
-                html: `<p>Klik link ini untuk mendaftar dan bergabung: <a href="${inviteLink}">Daftar & Bergabung</a></p>`
-            };
-
-            try {
-                await transporter.sendMail(mailOptions);
-                return res.status(200).json({ success: true, message: `Registration invite has been sent to ${email}` });
-            } catch (emailErr) {
-                console.error("⚠️ Failed to send registration email:", emailErr.message);
-                // Invite tetap tersimpan di DB meski email gagal
-                return res.status(200).json({ 
-                    success: true, 
-                    message: `Invite saved but email could not be sent to ${email}. Check SMTP configuration.`
-                });
-            }
+            return res.status(200).json({
+                success: true,
+                message:`Pending invite saved for ${email}.`,
+                data: {
+                    inviteLink: inviteLink
+                }
+            });
         }
     } catch (error) {
         console.error("❌ Error Invite User:", error);
@@ -431,6 +391,19 @@ exports.getSiteNodes = async (req, res) => {
     try {
         const {siteId} = req.params;
         const {gateID} = req.query;
+        const userId = extractUserId(req);
+        
+        const site = await Site.findById(siteId);
+        if (!site) return res.status(404).json({ success: false, message: "Site not found." });
+
+        const isOwner = site.ownerId.toString() === userId.toString();
+        const isAdmin = site.admins.some(a => a.userId.toString() === userId.toString());
+        const isMember = site.members && site.members.some(m => m.userId.toString() === userId.toString());
+
+        if (!isOwner && !isAdmin && !isMember) {
+            return res.status(403).json({ success: false, message: "Access denied." });
+        }
+
         let query = { siteId: siteId };
 
         if (gateID) {
@@ -439,6 +412,7 @@ exports.getSiteNodes = async (req, res) => {
                 {gateID: null}
             ];
         }
+
         const nodes = await Node.find(query).populate('gateID', 'name mac isOnline currentMode').sort({createdAt: -1}).lean();
 
         res.json({

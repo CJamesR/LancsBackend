@@ -242,12 +242,27 @@ exports.getUserGateways = async (req, res) => {
 exports.getLatestSensorData = async (req, res) => {
   try {
     const { sensorId } = req.params;
-    const userId = req.user.userId; // Dari middleware protect
+    const userId = req.user.userId || req.user.id;
+
+    const device = await Device.findOne({ serialID: sensorId });
+    if (!device) return res.status(404).json({success: false, message: `Device ${sensorId} not found`}); 
+
+    if (device.siteId) {
+      const site = await Site.findById(device.siteId);
+      if (!site) return res.status(404).json({success: false, message: `Site for device ${sensorId} not found`});
+
+      const isOwner = site.ownerId.toString() === userId.toString();
+      const isAdmin = site.admins.some(adminId => adminId.toString() === userId.toString());
+      const isMember = site.members && site.members.some(member => member.userId.toString() === userId.toString());
+
+      if (!isOwner && !isAdmin && !isMember) {
+        return res.status(403).json({ success: false, message: "Access denied." });
+      }
+    } else {
+      return res.status(403).json({ success: false, message: "Device is not associated with any site." });
+    }
 
     console.log(`🔍 Latest data request for: ${sensorId} by user: ${userId}`);
-
-    // Optional: Check if user has access to this sensor
-    // Jika Anda punya sistem permission, bisa ditambahkan di sini
 
     // Get sensor model
     const SensorModel = getSensorModel(sensorId);

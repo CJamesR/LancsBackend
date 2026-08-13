@@ -51,12 +51,13 @@ app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '100kb' }));
 app.use(cors({
-  origin: true, // Allow all origins
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
 }));
 
+app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     console.error("❌ ERROR FATAL: Flutter mengirim format JSON yang cacat!");
@@ -242,4 +243,14 @@ httpServer.on('error', (error) => {
     console.log('   2. Kill process:');
     console.log('      netstat -ano | findstr :${PORT}');
   }
+});
+
+process.on('unhandledRejection', (err, promise) => {
+  console.error(`🔥 FATAL ERROR (Unhandled Rejection): ${err.message}`);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error(`🔥 FATAL ERROR (Uncaught Exception):`);
+  console.error(err.stack);
+  process.exit(1); 
 });

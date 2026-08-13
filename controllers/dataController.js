@@ -125,8 +125,8 @@ exports.getChartData = async (req, res) => {
     const { interval = 'hour', hours = 24, nodeId } = req.query;
     const userId = req.user.userId;
     
-    const user = await User.findById(req.user.userId);
-    const hasAccess = user.devices.some(d => d.gatewayId === deviceId);
+    const allowedDevices = await getAllowedDevicesIds(userId);
+    const hasAccess = allowedDevices.includes(deviceId);
     
     if (!hasAccess) {
       return res.status(403).json({
@@ -136,7 +136,8 @@ exports.getChartData = async (req, res) => {
     }
     
     const SensorModel = getSensorModel(deviceId);
-    const timeAgo = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const safeHours = Math.min(Number(hours) || 24, 168);
+    const timeAgo = new Date(Date.now() - safeHours * 60 * 60 * 1000);
     
     let groupByFormat;
     switch(interval) {
