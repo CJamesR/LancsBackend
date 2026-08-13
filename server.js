@@ -42,6 +42,7 @@ try {
   console.log("🔥 Firebase Admin SDK (FCM) berhasil diinisialisasi.");
 } catch (error) {
   console.warn("⚠️ Peringatan: Gagal inisialisasi Firebase (FCM). Pastikan file config/serviceAccountKey.json tersedia.");
+  console.error("🔍 DETAIL ERROR:", error.message); // ✅ Tambahkan baris ini
 }
 
 const app = express();
