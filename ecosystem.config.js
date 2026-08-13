@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: 'lancs-server',
+    name: 'lancs-IoT',
     script: 'server.js',
     instances: 'max',
     exec_mode: 'cluster',

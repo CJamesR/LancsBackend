@@ -206,11 +206,14 @@ const HOST = process.env.HOST || '0.0.0.0'; // Use your local IP for external ac
 
 const http = require('http');
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/pm2')
 
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: "*" }
 });
+
+io.adapter(createAdapter());
 
 global.io = io;
 
