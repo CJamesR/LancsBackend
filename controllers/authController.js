@@ -16,11 +16,20 @@ const formatWIB = (date) => {
     return new Date(date).toLocaleString('sv-SE', { timeZone: 'Asia/Jakarta' });
 };
 
-const generateToken = (userId, role) => {
+// Pemisahan Token Harian (Singkat) dan Token Sesi (Panjang)
+const generateAccessToken = (userId, role) => {
   return jwt.sign(
     { userId, role },
     process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '15m' } 
+  );
+};
+
+const generateRefreshToken = (userId) => {
+  return jwt.sign(
+    { userId },
+    process.env.JWT_SECRET,
+    { expiresIn: '30d' } 
   );
 };
 
@@ -224,13 +233,16 @@ exports.login = async (req, res) => {
         message: 'Email has not been verified. Please check your email for verification.'
       });
     }
-    const token = generateToken(user._id, user.role);
+    
+    const accessToken = generateAccessToken(user._id, user.role);
+    const refreshToken = generateRefreshToken(user._id);
     const username = user.username || user.email.split('@')[0] || 'User';
 
     // Format response untuk Flutter
     const response = {
       success: true,
-      token: token,
+      token: accessToken,
+      refreshToken: refreshToken,
       user: {
         _id: user._id,
         email: user.email,
@@ -247,11 +259,12 @@ exports.login = async (req, res) => {
       {
         $set: {
           lastLogin: new Date(),
+          refreshToken: refreshToken,
           ...(!user.username && { username: username })
         }
       }
     ).catch(err => {
-      console.warn('⚠️  Warning: Could not update lastLogin:', err.message);
+      console.warn('⚠️  Warning: Could not update DB during login:', err.message);
     });
 
     res.json(response);
@@ -260,7 +273,6 @@ exports.login = async (req, res) => {
     console.error('🔥 LOGIN Error:', error.message);
     console.error('🔥 Stack trace:', error.stack);
 
-    // Berikan error yang lebih user-friendly
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
@@ -281,32 +293,33 @@ exports.login = async (req, res) => {
 exports.refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) 
-      return res.status(400).json({
-        message: 'Refresh token is required'
-      });
+    if (!refreshToken) {
+      return res.status(400).json({ message: 'Refresh token is required' });
+    }
     
-    // Find user by refresh token
     const user = await User.findOne({ refreshToken });
-    if (!user) 
-      return res.status(401).json({
-        message: 'Refresh token is not valid'
-      });
-
-    // Check if user is active
-    if (!user.isActive)
-      return res.status(401).json({
-        message: 'Account is not active'
-      });
+    if (!user) {
+      return res.status(401).json({ message: 'Refresh token is not valid' });
+    }
+    if (!user.isActive) {
+      return res.status(401).json({ message: 'Account is not active' });
+    }
     
-    // Generate new token
-    const newToken = generateToken(user._id, user.role);
-    res.json({token: newToken});
+    // Verifikasi validitas tanda tangan refresh token
+    jwt.verify(refreshToken, process.env.JWT_SECRET, async (err, decoded) => {
+      if (err) {
+        // Token telah usang secara waktu atau kriptografi
+        await User.updateOne({ _id: user._id }, { $set: { refreshToken: null } });
+        return res.status(401).json({ message: 'Refresh token expired or invalid. Please login again.' });
+      }
+      
+      const newAccessToken = generateAccessToken(user._id, user.role);
+      res.json({ token: newAccessToken });
+    });
 
   } catch (error) {
     console.error('🔥 REFRESH TOKEN Error:', error);
-    res.status(500).json({
-      message: 'Error refreshing token'});
+    res.status(500).json({ message: 'Error refreshing token' });
   }
 };
 
@@ -444,9 +457,6 @@ exports.logout = async (req, res) => {
       updateQuery.$pull = { trustedDevices: { deviceId: deviceId } };
     }
     await User.findByIdAndUpdate(req.user.userId, updateQuery);
-    // await User.findByIdAndUpdate(req.user.userId, {
-    //   refreshToken: null
-    // });
 
     res.json({
       message: 'Logout successful'
@@ -479,7 +489,6 @@ exports.forgotPassword = async (req, res) => {
         user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // Valid 15 menit
         await user.save();
 
-        // Menggunakan format dinamis req.protocol dan req.get('host') persis seperti register
         const resetUrl = `lancsapp://reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
 
         const mailOptions = {
@@ -522,19 +531,15 @@ exports.forgotPassword = async (req, res) => {
 // =========================================================================
 exports.resetPassword = async (req, res) => {
     try {
-        // Menerima token mentah dan email dari URL, serta password baru dari form
         const { email, token, newPassword } = req.body;
 
         if (!token || !newPassword || !email) {
             return res.status(400).json({ success: false, message: 'Incomplete data.' });
         }
 
-        // 1. Lakukan hash pada token mentah yang diterima dari user
         const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
         const cleanEmail = email.trim().toLowerCase();
 
-        // 2. Cari user berdasarkan email dan hash token, pastikan belum kedaluwarsa
-        // Tambahkan .select('+resetPasswordToken') karena tadi kita set select: false di model
         const user = await User.findOne({
             email: cleanEmail,
             resetPasswordToken: resetTokenHash,
@@ -548,10 +553,8 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        // 3. Update password (pre-save hook di userModel akan otomatis melakukan hashing pada password baru)
         user.password = newPassword;
         
-        // 4. Bersihkan token dari database karena sudah selesai digunakan
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
         await user.save();
@@ -586,29 +589,31 @@ exports.googleSignIn = async (req, res) => {
     let user = await User.findOne({ email: email });
 
     if (user) {
-      // 🟢 USER SUDAH ADA
       if (!user.googleId) {
         user.googleId = googleId;
         user.isVerified = true;
-        await user.save();
       }
 
-      const token = generateToken(user._id, user.role);
+      const accessToken = generateAccessToken(user._id, user.role);
+      const refreshToken = generateRefreshToken(user._id);
+      
+      user.refreshToken = refreshToken;
+      await user.save();
 
       return res.status(200).json({
         isNewUser: false,
-        token: token,
+        token: accessToken,
+        refreshToken: refreshToken,
         user: { 
           username: user.username,
           email: user.email
         }
       });
     } else {
-      // 🟡 USER BARU (Kirim tempToken)
       const tempToken = jwt.sign(
         { email: email, googleId: googleId },
         process.env.JWT_SECRET,
-        { expiresIn: '15m' } // Valid for 15 minutes
+        { expiresIn: '15m' } 
       );
 
       return res.status(200).json({
@@ -632,17 +637,14 @@ exports.completeGoogleProfile = async (req, res) => {
       return res.status(400).json({ message: "Data is incomplete" });
     }
 
-    // Bongkar isi tempToken
     const decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
     const { email, googleId } = decoded;
 
-    // Cek ketersediaan username
     const existingUsername = await User.findOne({ username: username });
     if (existingUsername) {
       return res.status(400).json({ message: "Username has already been used, please choose another one" });
     }
 
-    // Buat User Baru
     const newUser = await User.create({
       email: email,
       googleId: googleId,
@@ -650,14 +652,11 @@ exports.completeGoogleProfile = async (req, res) => {
       realName: realName || "-", 
       role: 'customer',
       isActive: true,
-      isVerified: true // Otomatis verified
+      isVerified: true 
     });
 
     console.log(`👤 Google user created successfully: ${newUser.username}`);
 
-    // =====================================================================
-    // 🔥 LOGIKA PENYAMBUNG: KLAIM UNDANGAN SITE OTOMATIS (GOOGLE SIGN-IN)
-    // =====================================================================
     const pendingInvites = await PendingInvite.find({ email: email.toLowerCase() });
     
     if (pendingInvites.length > 0) {
@@ -681,13 +680,17 @@ exports.completeGoogleProfile = async (req, res) => {
         }
         await PendingInvite.deleteMany({ email: email.toLowerCase() });
     }
-    // =====================================================================
 
-    const token = generateToken(newUser._id, newUser.role);
+    const accessToken = generateAccessToken(newUser._id, newUser.role);
+    const refreshToken = generateRefreshToken(newUser._id);
+    
+    newUser.refreshToken = refreshToken;
+    await newUser.save();
 
     res.status(201).json({
       isNewUser: false,
-      token: token,
+      token: accessToken,
+      refreshToken: refreshToken,
       user: { 
         username: newUser.username, 
         email: newUser.email,
@@ -754,9 +757,6 @@ exports.verifyResetToken = async (req, res) => {
   }
 };
 
-// @desc    Resend Verification Email
-// @route   POST /api/auth/resend-verification
-// @access  Public
 exports.resendVerificationEmail = async (req, res) => {
   try {
     const {email} = req.body;

@@ -1,5 +1,4 @@
 // middleware/checksumValidator.js
-// middleware/checksumValidator.js
 module.exports = (req, res, next) => {
   const { gateID, Suhu, Kelembapan, Waktu, Checksum } = req.body;
   

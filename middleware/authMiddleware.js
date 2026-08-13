@@ -21,7 +21,6 @@ exports.protect = async (req, res, next) => {
 
     req.user = { userId: user._id, role: user.role, username: user.username };
 
-    // 🔥 OPTIMASI: Hanya update jika selisih > 5 menit dari update terakhir
     const now = new Date();
     const fiveMinutes = 5 * 60 * 1000;
     if (!user.lastOnline || (now - user.lastOnline) > fiveMinutes) {
@@ -30,7 +29,13 @@ exports.protect = async (req, res, next) => {
 
     next();
   } catch (error) {
-    res.status(401).json({ success: false, message: 'Token invalid' });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: 'Token expired, please login again' });
+    } 
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ success: false, message: 'Invalid token, please login again' });  
+    }
+    return res.status(500).json({ success: false, message: 'There was an error in verification session'});
   }
 };
 
@@ -64,18 +69,15 @@ exports.checkSiteRole = (allowedRoles) => {
           const memberRecord = site.members?.find(m => m.userId.toString() === userId.toString());
           const userRole = isOwner ? 'owner' : (memberRecord ? memberRecord.role : null);
 
-          // 1. Owner selalu diizinkan masuk
           if (isOwner) {
             req.siteData = site;
             return next();}
 
-          // 2. Cek Role Member
           if (userRole && allowedRoles.includes(userRole)) {
             req.siteData = site;
             return next();
           }
 
-          // 3. Fallback: Cek di sistem Admin lama
           const isAdminLama = site.admins.some(a => a.userId.toString() === userId.toString());
           if (isAdminLama && allowedRoles.includes('admin')) {
             req.siteData = site;

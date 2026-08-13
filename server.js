@@ -26,7 +26,7 @@ const sensorController = require("./controllers/sensorController");
 const dataController = require("./controllers/dataController");
 const mqttHandler = require("./mqtt/mqttHandler");
 const siteRoutes = require('./routes/siteRoutes');
-const startOfflineChecker = require('./cron/statusChecker');
+// const startOfflineChecker = require('./cron/statusChecker');
 const notificationRoutes = require('./routes/notificationRoutes');
 
 const mongoose = require('mongoose');
@@ -199,7 +199,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-startOfflineChecker();
+// startOfflineChecker();
 // ==================== START SERVER ====================
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0'; // Use your local IP for external access
