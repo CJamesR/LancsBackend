@@ -10,6 +10,8 @@ const bcrypt = require('bcryptjs');
 const PendingInvite = require('../models/pendingInviteModel');
 const Site = require('../models/siteModel');
 const ActivityLog = require('../models/activityLogModel');
+// 👇 IMPOR UTILITY AUDIT LOG NIST AU-2
+const { logEvent, EVENT } = require('../utils/auditLogger'); 
 
 const formatWIB = (date) => {
     if (!date) return null;
@@ -221,6 +223,10 @@ exports.login = async (req, res) => {
 
     if (!isPasswordValid) {
       console.log('❌ Invalid password for user:', identifier);
+      
+      // 👇 REKAM JEJAK AUDIT NIST AU-2 (Gagal Kata Sandi)
+      await logEvent(EVENT.AUTH_FAIL, identifier, 'Percobaan login gagal: Kata sandi salah.', { input_deviceId: deviceId });
+
       return res.status(401).json({
         success: false,
         message: 'Email/Username or password is incorrect'
@@ -310,6 +316,10 @@ exports.refreshToken = async (req, res) => {
       if (err) {
         // Token telah usang secara waktu atau kriptografi
         await User.updateOne({ _id: user._id }, { $set: { refreshToken: null } });
+        
+        // 👇 REKAM JEJAK AUDIT NIST AU-2 (Manipulasi Token / Kedaluwarsa)
+        await logEvent(EVENT.AUTH_FAIL, user.email, 'Penolakan Refresh Token: Token usang atau terindikasi dimanipulasi.', { error_type: err.name, message: err.message });
+        
         return res.status(401).json({ message: 'Refresh token expired or invalid. Please login again.' });
       }
       
@@ -414,7 +424,7 @@ exports.changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.userId;
 
-    const user = await User.findById(userId).select('+password');
+    const user = await User.findById(userId).select('+password email');
     if (!user) {
       return res.status(404).json({
         message: 'User not found'
@@ -424,6 +434,10 @@ exports.changePassword = async (req, res) => {
     // Check current password
     const isPasswordValid = await user.comparePassword(currentPassword);
     if (!isPasswordValid) {
+      
+      // 👇 REKAM JEJAK AUDIT NIST AU-2 (Gagal Verifikasi Kata Sandi Lama)
+      await logEvent(EVENT.AUTH_FAIL, user.email, 'Percobaan ubah kata sandi digagalkan: Kata sandi lama salah.');
+
       return res.status(401).json({
         message: 'Current password is incorrect'
       });
@@ -547,6 +561,9 @@ exports.resetPassword = async (req, res) => {
         });
 
         if (!user) {
+            // 👇 REKAM JEJAK AUDIT NIST AU-2 (Gagal Reset Sandi dengan Token Palsu/Usang)
+            await logEvent(EVENT.AUTH_FAIL, cleanEmail, 'Percobaan reset kata sandi gagal: Token tidak valid atau telah usang.');
+
             return res.status(400).json({ 
                 success: false, 
                 message: 'The reset password link is invalid or has expired.'

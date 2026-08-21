@@ -149,7 +149,7 @@ class MQTTHandler {
   }
 
   async handleGatewayRegister(data) {
-    const { gateway_mac, user_token, siteId, chipId } = data;
+    const { gateway_mac, user_token, siteId, chipId, fw_version } = data;
     console.log(`\n📥 [MQTT IN] Gateway Register: ${gateway_mac}`);
 
     if (!gateway_mac || !user_token) {
@@ -184,10 +184,14 @@ class MQTTHandler {
         currentMode: 2
       };
 
-      // if (chipId) {
-      //   const salt = await bcrypt.genSalt(10);
-      //   updatePayload.chipId = await bcrypt.hash(chipId, salt);
-      // }
+      if (chipId) {
+        const salt = await bcrypt.genSalt(10);
+        updatePayload.chipId = await bcrypt.hash(chipId, salt);
+      }
+
+      if (fw_version) {
+        updatePayload.firmwareVersion = fw_version;
+      }
 
       const gateway = await Gateway.findOneAndUpdate(
         { mac: gateway_mac.toUpperCase() },
@@ -195,9 +199,9 @@ class MQTTHandler {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
-      console.log(`✅ Gateway [${gateway_mac}] registered → User: ${userId}`);
+      console.log(`✅ Gateway [${gateway_mac}] registered → User: ${userId} | FW: ${fw_version || '1.0.0'}`);
       
-      await logEvent(EVENT.DEVICE_REG, gateway_mac.toUpperCase(), `Gateway berhasil diregistrasi ke User ID: ${userId}`);
+      await logEvent(EVENT.DEVICE_REG, gateway_mac.toUpperCase(), `Gateway berhasil diregistrasi ke User ID: ${userId} dengan versi firmware ${fw_version || '1.0.0'}`);
 
       this.publish(`LancsSK/gateway/ack/${gateway_mac}`, JSON.stringify({
         status: 'success',
@@ -237,25 +241,25 @@ class MQTTHandler {
             return;
         }
 
-        // if (!gatewayData.chipId) {
-        //     console.error(`🚨 [KEAMANAN] Gateway ${targetMac} belum memiliki data Chip ID di sistem. Reset ditolak.`);
-        //     await logEvent(EVENT.AUTH_FAIL, targetMac, 'Permintaan reset ditolak: Chip ID tidak terdaftar di database.');
-        //     return;
-        // }
+        if (!gatewayData.chipId) {
+            console.error(`🚨 [KEAMANAN] Gateway ${targetMac} belum memiliki data Chip ID di sistem. Reset ditolak.`);
+            await logEvent(EVENT.AUTH_FAIL, targetMac, 'Permintaan reset ditolak: Chip ID tidak terdaftar di database.');
+            return;
+        }
 
-        // if (!hardware_secret) {
-        //     console.error(`🚨 [KEAMANAN] Payload tidak menyertakan hardware_secret. Reset ditolak.`);
-        //     await logEvent(EVENT.AUTH_FAIL, targetMac, 'Permintaan reset ditolak: hardware_secret kosong pada payload MQTT.');
-        //     return;
-        // }
+        if (!hardware_secret) {
+            console.error(`🚨 [KEAMANAN] Payload tidak menyertakan hardware_secret. Reset ditolak.`);
+            await logEvent(EVENT.AUTH_FAIL, targetMac, 'Permintaan reset ditolak: hardware_secret kosong pada payload MQTT.');
+            return;
+        }
 
-        // const isMatch = await bcrypt.compare(hardware_secret, gatewayData.chipId);
+        const isMatch = await bcrypt.compare(hardware_secret, gatewayData.chipId);
         
-        // if (!isMatch) {
-        //      console.error(`🚨 [KEAMANAN] Percobaan reset manual DITOLAK untuk Gateway ${targetMac}. Hash Chip ID tidak valid.`);
-        //      await logEvent(EVENT.SEC_COMPROMISE, targetMac, 'Upaya reset paksa ditolak. Chip ID tidak cocok dengan hash di database.', { provided_secret: hardware_secret });
-        //      return;
-        // }
+        if (!isMatch) {
+             console.error(`🚨 [KEAMANAN] Percobaan reset manual DITOLAK untuk Gateway ${targetMac}. Hash Chip ID tidak valid.`);
+             await logEvent(EVENT.SEC_COMPROMISE, targetMac, 'Upaya reset paksa ditolak. Chip ID tidak cocok dengan hash di database.', { provided_secret: hardware_secret });
+             return;
+        }
 
         console.log(`⏳ [TEARDOWN] Bypass validasi transaksi. Mengeksekusi Hard Delete untuk Gateway ${targetMac}...`);
         
@@ -609,3 +613,9 @@ class MQTTHandler {
 }
 
 module.exports = new MQTTHandler();
+
+// Format di ESP
+// doc["gateway_mac"] = WiFi.macAddress();
+// doc["user_token"]  = currentUserToken.c_str();
+// doc["chipId"]      = String(ESP.getChipId());
+// doc["fw_version"]  = "1.2.0"; // Sesuaikan dengan versi rilis kode ESP8266 saat ini

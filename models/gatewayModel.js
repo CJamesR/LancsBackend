@@ -28,7 +28,16 @@ const gatewaySchema = new mongoose.Schema({
         index: true
     },
 
-    // Status koneksi — diupdate setiap data masuk via MQTT
+    // chipId: {
+    //     type: String,
+    //     default: null
+    // },
+    
+    // firmwareVersion: {
+    //     type: String,
+    //     default: '1.0.0'
+    // },
+
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: null },
 
