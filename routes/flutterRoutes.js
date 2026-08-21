@@ -56,7 +56,7 @@ const buildGatewayWithNodes = async (gateways) => {
                 temperature: n.lastTemperature,
                 humidity: n.lastHumidity,
                 lastUpdate: n.lastSeen,
-                status: isOnline(n.lastSeen, 10) ? 'online' : 'offline'
+                // status: isOnline(n.lastSeen, 10) ? 'online' : 'offline'
             }));
 
         console.log(`  [buildGatewayWithNodes] Gateway ${gw.mac} → ${childNodes.length} node(s)`);
@@ -65,7 +65,7 @@ const buildGatewayWithNodes = async (gateways) => {
             id: gw._id,
             mac: gw.mac,
             name: gw.name || gw.mac,
-            status: isOnline(gw.lastSeen, 5) ? 'online' : 'offline',
+            // status: isOnline(gw.lastSeen, 10) ? 'online' : 'offline',
             nodes: childNodes
         };
     });
@@ -103,7 +103,7 @@ router.get('/sites/:siteId/dashboard', protect, apiLimiter, async (req, res) => 
         if (gateways.length > 0) {
             gateways.forEach(gw => console.log(`    ↳ ${gw.mac} | _id: ${gw._id} | lastSeen: ${gw.lastSeen}`));
         } else {
-            console.log('  [DASHBOARD] ⚠️  Tidak ada Gateway yang cocok. Kemungkinan devices di Site berisi serialID Device lama, bukan MAC Gateway baru.');
+            console.log('  [DASHBOARD] ⚠️ Tidak ada Gateway yang cocok. Kemungkinan devices di Site berisi serialID Device lama, bukan MAC Gateway baru.');
         }
 
         const builtData = await buildGatewayWithNodes(gateways);
@@ -171,7 +171,7 @@ router.get('/node/:serialId/detail', protect, async (req, res) => {
                 serialId: node.nodeID,
                 name: node.name || node.nodeID,
                 gatewayMac: gateway.mac,
-                status: isOnline(node.lastSeen, 10) ? 'online' : 'offline',
+                // status: isOnline(node.lastSeen, 10) ? 'online' : 'offline', 
                 currentTemperature: node.lastTemperature,
                 currentHumidity: node.lastHumidity,
                 history24h: historyData.map(d => ({

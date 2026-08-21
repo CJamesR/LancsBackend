@@ -179,8 +179,8 @@ class MQTTHandler {
       const updatePayload = {
         ownerId: userId,
         siteId: actualSiteObjectId,
-        isOnline: true,
-        lastSeen: new Date(),
+        // isOnline: true,
+        // lastSeen: new Date(),
         currentMode: 2
       };
 
@@ -415,7 +415,7 @@ class MQTTHandler {
                 gateID: gatewayIdForNode,
                 siteId: siteIdForNode,
                 // isOnline: true,
-                lastSeen: new Date(),
+                // lastSeen: new Date(),
                 lastTemperature: parseFloat(Suhu),
                 lastHumidity: parseFloat(Kelembapan)
               }
@@ -444,7 +444,7 @@ class MQTTHandler {
   async updateGatewayStatus(gateID, suhu) {
     await Gateway.findOneAndUpdate(
       { mac: gateID.toUpperCase() },
-      { $set: { isOnline: true, lastSeen: new Date() } }
+      // { $set: { isOnline: true, lastSeen: new Date() } }
     );
     let device = await Device.findOne({ serialID: gateID });
     if (!device) {
@@ -516,7 +516,7 @@ async handleNodeConnectionStatus(data) {
       console.error('❌ Error handleNodeConnectionStatus:', error.message);
     }
   }
-  
+
   async checkAndCreateAlert(entity, suhu, deviceId) {
     const maxT = entity.maxTemp || 35;
     const minT = entity.minTemp || 15;
