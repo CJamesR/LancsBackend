@@ -15,6 +15,7 @@ const mqttHandler = require('../mqtt/mqttHandler');
 const siteController = require('../controllers/siteController');
 const { protect, checkSiteRole } = require('../middleware/authMiddleware');
 const Transaction = require('../models/transactionModel');
+const Notification = require('../models/notificationModel')
 const crypto = require('crypto');
 
 // =========================================================================
@@ -548,5 +549,59 @@ router.post('/nodes/delete-batch', protect, apiLimiter, async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+router.delete('/user/account', protect, apiLimiter, async (req, res) => {
+    try {
+        const userId = extractUserId(req);
+        console.log(`\n🗑️ [GDPR & HARDWARE] Memulai Hard Delete untuk User ID: ${userId}`)
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({success: false, message: 'User Not Found'})
+        }
+
+        const ownedGateways = await Gateway.find({ownerId: userId});
+
+        for (const gw of ownedGateways) {
+            const req_id = crypto.randomUUID();
+            console.log(`📤 [TEARDOWN] Mengirim sinyal pemusnahan ke memori ESP32 Gateway: ${gw.mac}`);
+            mqttHandler.sendGatewayCommand(gw.mac, 'delete_gateway', {req_id});
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const ownedSites = await Site.find({ownerId: userId});
+
+        for (const site of ownedSites) {
+            const gateways = await Gateway.find({siteId: site._id});
+            const gatewayIds = gateways.map(gw => gw._id);
+
+            await Node.deleteMany({gateID: {$in: gatewayIds}});
+            await Gateway.deleteMany({siteId: site._id});
+            await ActivityLog.deleteMany({siteId: site._id});
+            await Notification.deleteMany({siteId: site._id});
+            await Invite.deleteMany({siteId: site._id});
+        }
+        await Site.deleteMany({ownerId: userId});
+
+        await Site.updateMany(
+            { "admins.userId": userId},
+            { $pull: {admins: {userId: userId}}}
+    );
+
+    await Invite.deleteMany({recipientEmail: user.email.toLowerCase()});
+
+    await User.findByIdAndDelete(userId);
+
+    console.log(`✅ [GDPR] Hard Delete selesai. Akun dan seluruh koneksi hardware berhasil dimatikan.`);
+    res.status(200).json({
+        success: true,
+        message: "Account, hardware connections, and all associated data have been permanently deleted."
+    });
+    } catch {
+        console.error ("❌ [GDPR FATAL ERROR]:", error.message);
+        res.status(500).json({success: false, error: error.message});
+    }
+})
 
 module.exports = router;
