@@ -414,7 +414,7 @@ class MQTTHandler {
                 // PERBAIKAN 2: Menggunakan variabel khusus, menghindari ReferenceError 'gateway'
                 gateID: gatewayIdForNode,
                 siteId: siteIdForNode,
-                isOnline: true,
+                // isOnline: true,
                 lastSeen: new Date(),
                 lastTemperature: parseFloat(Suhu),
                 lastHumidity: parseFloat(Kelembapan)
@@ -457,7 +457,7 @@ class MQTTHandler {
       });
     }
     device.lastActive = new Date();
-    device.isOnline = true;
+    // device.isOnline = true;
     await device.save();
     if (device.siteId) {
       await this.checkAndCreateAlert(
@@ -468,11 +468,15 @@ class MQTTHandler {
     }
   }
 
-  async handleNodeConnectionStatus(data) {
+async handleNodeConnectionStatus(data) {
     try {
       const { gateID, nodeID, status, message } = data;
 
+      // 👇 TAMBAHAN: Cetak log saat ada paket MQTT pendaftaran Node masuk
+      console.log(`\n📥 [MQTT IN] Status Koneksi Node Diterima | Gateway: ${gateID || '-'} | Node: ${nodeID || '-'} | Status: ${status}`);
+
       if (!gateID || !nodeID) {
+        console.warn('⚠️ Payload pendaftaran Node ditolak: gateID atau nodeID kosong.');
         return;
       }
 
@@ -485,13 +489,17 @@ class MQTTHandler {
             $set: {
               gateID: gateway ? gateway._id : null,
               siteId: gateway ? gateway.siteId : null,
-              isOnline: true,
-              lastSeen: new Date()
+              // isOnline: true,       <-- Sesuai kesepakatan, ini tetap dinonaktifkan
+              // lastSeen: new Date()  <-- Sesuai kesepakatan, ini tetap dinonaktifkan
             }
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+        console.log(`✅ Node [${nodeID.toUpperCase()}] berhasil diikat ke pangkalan data untuk Gateway [${gateID.toUpperCase()}]`);
+      } else {
+        console.warn(`⚠️ Node [${nodeID.toUpperCase()}] gagal terhubung. Pesan dari hardware: ${message}`);
       }
+
       if (global.io) {
         const eventName = `node_status_${gateID.toUpperCase()}`;
         global.io.emit(eventName, {
@@ -501,13 +509,14 @@ class MQTTHandler {
           message: message || (status === 'success' ? 'Node berhasil terhubung' : 'Koneksi gagal'),
           timestamp: new Date().toISOString()
         });
+        console.log(`📤 [SOCKET OUT] Memancarkan pembaruan antarmuka web melalui rute: ${eventName}`);
       }
       
     } catch (error) {
       console.error('❌ Error handleNodeConnectionStatus:', error.message);
     }
   }
-
+  
   async checkAndCreateAlert(entity, suhu, deviceId) {
     const maxT = entity.maxTemp || 35;
     const minT = entity.minTemp || 15;

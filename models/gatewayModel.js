@@ -38,7 +38,7 @@ const gatewaySchema = new mongoose.Schema({
     //     default: '1.0.0'
     // },
 
-    isOnline: { type: Boolean, default: false },
+    // isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: null },
 
     currentMode: {
