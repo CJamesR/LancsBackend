@@ -179,8 +179,8 @@ class MQTTHandler {
       const updatePayload = {
         ownerId: userId,
         siteId: actualSiteObjectId,
-        // isOnline: true,
-        // lastSeen: new Date(),
+        isOnline: true,
+        lastSeen: new Date(),
         currentMode: 2
       };
 
@@ -414,8 +414,8 @@ class MQTTHandler {
                 // PERBAIKAN 2: Menggunakan variabel khusus, menghindari ReferenceError 'gateway'
                 gateID: gatewayIdForNode,
                 siteId: siteIdForNode,
-                // isOnline: true,
-                // lastSeen: new Date(),
+                isOnline: true,
+                lastSeen: new Date(),
                 lastTemperature: parseFloat(Suhu),
                 lastHumidity: parseFloat(Kelembapan)
               }
@@ -444,7 +444,7 @@ class MQTTHandler {
   async updateGatewayStatus(gateID, suhu) {
     await Gateway.findOneAndUpdate(
       { mac: gateID.toUpperCase() },
-      // { $set: { isOnline: true, lastSeen: new Date() } }
+      { $set: { isOnline: true, lastSeen: new Date() } }
     );
     let device = await Device.findOne({ serialID: gateID });
     if (!device) {
@@ -457,7 +457,7 @@ class MQTTHandler {
       });
     }
     device.lastActive = new Date();
-    // device.isOnline = true;
+    device.isOnline = true;
     await device.save();
     if (device.siteId) {
       await this.checkAndCreateAlert(
@@ -489,8 +489,8 @@ async handleNodeConnectionStatus(data) {
             $set: {
               gateID: gateway ? gateway._id : null,
               siteId: gateway ? gateway.siteId : null,
-              // isOnline: true,       <-- Sesuai kesepakatan, ini tetap dinonaktifkan
-              // lastSeen: new Date()  <-- Sesuai kesepakatan, ini tetap dinonaktifkan
+              isOnline: true,
+              lastSeen: new Date()
             }
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }

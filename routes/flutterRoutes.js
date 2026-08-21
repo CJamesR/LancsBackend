@@ -56,6 +56,7 @@ const buildGatewayWithNodes = async (gateways) => {
                 temperature: n.lastTemperature,
                 humidity: n.lastHumidity,
                 lastUpdate: n.lastSeen,
+                status: 'online'
                 // status: isOnline(n.lastSeen, 10) ? 'online' : 'offline'
             }));
 
@@ -65,6 +66,7 @@ const buildGatewayWithNodes = async (gateways) => {
             id: gw._id,
             mac: gw.mac,
             name: gw.name || gw.mac,
+            status: 'online',
             // status: isOnline(gw.lastSeen, 10) ? 'online' : 'offline',
             nodes: childNodes
         };
@@ -171,6 +173,7 @@ router.get('/node/:serialId/detail', protect, async (req, res) => {
                 serialId: node.nodeID,
                 name: node.name || node.nodeID,
                 gatewayMac: gateway.mac,
+                status: 'online',
                 // status: isOnline(node.lastSeen, 10) ? 'online' : 'offline', 
                 currentTemperature: node.lastTemperature,
                 currentHumidity: node.lastHumidity,
