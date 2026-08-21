@@ -392,26 +392,28 @@ class MQTTHandler {
         if (!this.deviceCache.nodes[upperNodeID]) {
           let gatewayIdForNode = null;
           let siteIdForNode = null;
-          let gateway = null;
+          // let gateway = null;
 
-          if (this.deviceCache.gateways[upperGateID]) {
-            gateway = await Gateway.findOne({ mac: upperGateID }).lean();
-            if (gateway) {
-              this.deviceCache.gateways[upperGateID] = {id: gateway._id, siteId: gateway.siteId};
-              gatewayIdForNode = gateway._id;
-              siteIdForNode = gateway.siteId;
+          if (!this.deviceCache.gateways[upperGateID]) {
+            const foundGateway = await Gateway.findOne({ mac: upperGateID }).lean();
+            if (foundGateway) {
+              this.deviceCache.gateways[upperGateID] = { id: foundGateway._id, siteId: foundGateway.siteId };
+              gatewayIdForNode = foundGateway._id;
+              siteIdForNode = foundGateway.siteId;
             }
           } else {
-            gatewayIdForNode = this.deviceCache.gateways[upperGateID]?.id;
-            siteIdForNode = this.deviceCache.gateways[upperGateID]?.siteId;
+            // Jika Cache ADA, langsung ambil dari memori (RAM)
+            gatewayIdForNode = this.deviceCache.gateways[upperGateID].id;
+            siteIdForNode = this.deviceCache.gateways[upperGateID].siteId;
           }
           
           const node = await Node.findOneAndUpdate(
-            { nodeID: nodeID.toUpperCase() },
+            { nodeID: upperNodeID },
             {
               $set: {
-                gateID: gateway ? gateway._id : null,
-                siteId: gateway ? gateway.siteId : null,
+                // PERBAIKAN 2: Menggunakan variabel khusus, menghindari ReferenceError 'gateway'
+                gateID: gatewayIdForNode,
+                siteId: siteIdForNode,
                 isOnline: true,
                 lastSeen: new Date(),
                 lastTemperature: parseFloat(Suhu),
